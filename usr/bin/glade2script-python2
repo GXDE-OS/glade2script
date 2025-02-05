@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # -*- coding:Utf­8 ­-*-
 ############################################################################
 ##                                                                        ##
@@ -7,13 +7,10 @@
 ##   you will be able to handle its widgets from a bash script for        ##
 ##   example.                                                             ##
 ##                                                                        ##
-##     GladeToScript permet d'utiliser simplement des fonctions GTK       ##
-##   depuis un script/logiciel. Il permet sans grande connaissances       ##
-##   en GTK, de manier ses widgets depuis un script bash par exemple.     ##
-##                                                                        ##
 ############################################################################
 ##                                                                        ##
-##     Copyright (C) 2010-2011  AnsuzPeorth (ansuzpeorth@gmail.com)       ##
+##     Copyright (C) 2010-2012  AnsuzPeorth (ansuzpeorth@gmail.com)       ##
+##     Copyright (C) 2013-2020  YannUbuntu (yannubuntu@protonmail.com)    ##
 ##                                                                        ##
 ## This program is free software: you can redistribute it and/or modify   ##
 ## it under the terms of the GNU General Public License as published by   ##
@@ -29,15 +26,15 @@
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.  ##
 ##                                                                        ##
 ############################################################################
+##                                                                        ##
+##               One file for the entire source code is a choice          ##
+##                for easy integration into bash applications.            ##
+##                                                                        ##
+############################################################################
 import os, os.path
 import threading
 import subprocess
 import time
-import gtk
-import pygtk
-pygtk.require('2.0')
-import gobject
-import pango
 import shlex
 import sys
 import getopt
@@ -45,23 +42,35 @@ import gettext
 import re
 from xml.dom.minidom import parse
 from ConfigParser import ConfigParser
+import gi
+#gi.require_version('AppIndicator3', '0.1')
+gi.require_version('Gtk', '3.0')
+gi.require_version('Notify', '0.7')
+from gi.repository import Gtk
+from gi.repository import Gdk
+from gi.repository import GdkPixbuf
+from gi.repository import GObject
+from gi.repository import Pango
+from gi.repository import GLib
+from gi.repository import Gio
 
-DRAG_DEST_DEFAULT   = gtk.DEST_DEFAULT_ALL
-DRAG_ACTION_MOVE    = gtk.gdk.ACTION_MOVE
-DRAG_BTN_MASK       = gtk.gdk.BUTTON1_MASK
-DRAG_BEFORE         = gtk.TREE_VIEW_DROP_BEFORE
-DRAG_AFTER          = gtk.TREE_VIEW_DROP_AFTER
-DRAG_INTO_OR_BEFORE = gtk.TREE_VIEW_DROP_INTO_OR_BEFORE
-DRAG_INTO_OR_AFTER  = gtk.TREE_VIEW_DROP_INTO_OR_AFTER
 
-gobject.threads_init()
+DRAG_DEST_DEFAULT   = Gtk.DestDefaults.ALL
+DRAG_ACTION_MOVE    = Gdk.DragAction.MOVE
+DRAG_BTN_MASK       = Gdk.ModifierType.BUTTON1_MASK
+DRAG_BEFORE         = Gtk.TreeViewDropPosition.BEFORE
+DRAG_AFTER          = Gtk.TreeViewDropPosition.AFTER
+DRAG_INTO_OR_BEFORE = Gtk.TreeViewDropPosition.INTO_OR_BEFORE
+DRAG_INTO_OR_AFTER  = Gtk.TreeViewDropPosition.INTO_OR_AFTER
+
+GObject.threads_init()
 
 
 '''
 @name glade2script
 @authors AnsuzPeorth
 @copyright GPL3
-@version 2.4.0
+@version 3.2.0
 @date 2010 2012
 '''
 
@@ -112,10 +121,10 @@ class ThreadEmbed(threading.Thread):
         #if not self.Terminated: 
         os.kill(self.PID,9)
 
-class Embed(gtk.Socket):
+class Embed(Gtk.Socket):
     def __init__(self, widget, cmd):
         self.cmd  = cmd % widget.window.xid
-        gtk.Socket.__init__(self)
+        GObject.GObject.__init__(self)
         self.flag = False
         self.go_embed()
 
@@ -140,7 +149,7 @@ class LoadConfig(object):
     def set_gobject_idle_add(self, widget, action, value):
         widget = getattr(self.gui, widget)
         method = getattr(widget, action)
-        gobject.idle_add(method, *value)
+        GObject.idle_add(method, *value)
     
     def set_bool_int_widgets(self, section, gettype, gtkfunction):
         for option in self.options(section):
@@ -265,6 +274,7 @@ class ParseConfig(ConfigParser, LoadConfig, SaveConfig):
                     function, widget = section.split(':')
                     getattr(self, 'load_%s' % function)(widget)
             except:
+                #raise
                 for variable, value in self.items(section):
                     self.ENV['G2S%s'%variable] = value
         DEBUG('[[ CONFIG LOADED ]]')
@@ -514,7 +524,10 @@ class Callbacks(object):
         '''
         nom    = widget.get_name()
         #~FIXME GTK3
-        valeur = widget.get_active_text()
+        #valeur = widget.get_active_text()
+        try:
+            valeur = widget.get_model()[widget.get_active()][0]
+        except: return
         if valeur is not None:
             if import_py is not None:
                 getattr(self.th.IMPORT, nom) (valeur)
@@ -555,9 +568,9 @@ class Callbacks(object):
         nom    = widget.get_name()
         valeur = widget.get_text()
         try:
-            if icon   == gtk.ENTRY_ICON_PRIMARY:
+            if icon   == Gtk.EntryIconPosition.PRIMARY:
                 v = 'primary@'
-            elif icon == gtk.ENTRY_ICON_SECONDARY:
+            elif icon == Gtk.EntryIconPosition.SECONDARY:
                 v = 'secondary@'
             else:
                 v = ''
@@ -594,8 +607,47 @@ class Callbacks(object):
         '''
         if event is not None:
             if event.button == 3:
+                widget.popup(None,None,None,None,event.button,event.time)
+    
+    def on_menu_all(self,  widget, event=None, arg=None):
+        '''
+        @brief click launch contextmenu
+        @info the widget menu must be indicated in the user data
+        @info can be used from script:
+        @example echo 'SET@on_menu_all(self._menu1)'
+        '''
+        widget.popup(None,None,None,1,0)
+    
+    def on_menu_right(self, widget, event=None, arg=None):
+        '''
+        @brief left click launch contextmenu
+        @info the widget menu must be indicated in the user data
+        @info signal: button_*_event
+        '''
+        if event is not None:
+            if event.button == 3:
                 widget.popup(None,None,None,event.button,event.time)
-
+    
+    def on_menu_left(self, widget, event=None, arg=None):
+        '''
+        @brief left click launch contextmenu
+        @info the widget menu must be indicated in the user data
+        @info signal: button_*_event
+        '''
+        if event is not None:
+            if event.button == 1:
+                widget.popup(None,None,None,event.button,event.time)
+    
+    def on_menu_middle(self, widget, event=None, arg=None):
+        '''
+        @brief middle click launch contextmenu
+        @info the widget menu must be indicated in the user data
+        @info signal: button_*_event
+        '''
+        if event is not None:
+            if event.button == 2:
+                widget.popup(None,None,None,event.button,event.time)
+    
     def on_linkbutton(self,widget,event=None,arg=None):
         '''
         @brief web link
@@ -698,11 +750,11 @@ class Callbacks(object):
             if import_py is not None:
                 getattr(self.th.IMPORT, widget.get_name()) (*pyarg)
                 return
-            self.send_data('%s %s' % (nom, arg) )
+            self.send_data('%s %s' % (nom, arg.encode('utf8')) )
 
     def select_up(self,widget,event=None,arg=None):
         '''
-        @brief push up the selected line
+        @brief push up the selected line (not working with gtk3)
         '''
         self.th.TREEUP( '_@@_@@%s' % widget.get_name() )
 
@@ -788,7 +840,7 @@ class Callbacks(object):
         @return sh: press@key
         @return py: (press, key)
         '''
-        key = gtk.gdk.keyval_name(event.keyval)
+        key = Gdk.keyval_name(event.keyval)
         if import_py is not None:
             getattr(self.th.IMPORT, widget.get_name()) ('press', key)
             return
@@ -801,7 +853,7 @@ class Callbacks(object):
         @return sh: release@key
         @return py: release, key
         '''
-        key = gtk.gdk.keyval_name(event.keyval)
+        key = Gdk.keyval_name(event.keyval)
         if import_py is not None:
             getattr(self.th.IMPORT, widget.get_name()) ('release', key)
             return
@@ -892,13 +944,14 @@ class Callbacks(object):
         @return sh: scale@width height
         @return py: ('scale', width, height)
         '''
-        x, y, width, height = rect
-        if (self.old_scale_width != width or self.old_scale_height != height):
-            self.old_scale_width, self.old_scale_height = (width, height)
+        if (self.old_scale_width != rect.width or self.old_scale_height != rect.height):
+            self.old_scale_width, self.old_scale_height = (rect.width, rect.height)
             if import_py is not None:
-                getattr(self.th.IMPORT, widget.get_name()) ('scale', width, height)
+                getattr(self.th.IMPORT, widget.get_name()) ('scale', rect.width,
+                                                             rect.height)
                 return
-            self.send_data( '%s scale@%s %s' % (widget.get_name(), width, height) )
+            self.send_data( '%s scale@%s %s' % (widget.get_name(), rect.width,
+                                                 rect.height) )
 
     def auto_scale_img(self, widget, rect=None,arg=None):
         '''
@@ -908,7 +961,7 @@ class Callbacks(object):
         @return sh: img_scale="width height"
         @return py: img_scale = (width, height)
         '''
-        x, y, width, height = rect
+        x, y, width, height = (rect.x, rect.y, rect.width, rect.height)
         if import_py is not None:
             setattr(self.th.IMPORT, widget.get_name()+'_scale', (width, height))
         else:
@@ -920,8 +973,9 @@ class Callbacks(object):
             size = width
             if height > width:
                 size = height
-            pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, width, height)
-            gobject.idle_add(widget.set_from_pixbuf,pixbuf)
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, width,
+                                                            height)
+            GObject.idle_add(widget.set_from_pixbuf,pixbuf)
             DEBUG('[[ SCALE IMG ]] %s %s %s'% (width, height, filename))
 
 class GuiWebkit(object):
@@ -933,9 +987,10 @@ class GuiWebkit(object):
     def make_navigateur(self, name, box):
         nav = self.return_navigateur(name)
         box = eval('self.%s' % box)
-        scrolled = gtk.ScrolledWindow()
+        scrolled = Gtk.ScrolledWindow()
         scrolled.add(nav)
         box.add(scrolled)
+        
         exec( 'self.%s = nav' % name)
         box.show_all()
 
@@ -945,7 +1000,8 @@ class GuiWebkit(object):
         webview.connect("navigation-policy-decision-requested", self.nav_request)
         webview.connect("document-load-finished", self.document_load_finished_cb)
         if name in dic_webrequest:
-            idc = webview.connect("resource-request-starting", self.resource_request_cb)
+            idc = webview.connect("resource-request-starting",
+                                  self.resource_request_cb)
             #dic_websignal[name]["resource-request-starting"] = idc
             self.add_signal_to_dic(name, "webrequest", idc)
         if name in dic_webcache:
@@ -953,16 +1009,19 @@ class GuiWebkit(object):
                 l = [i for i in os.listdir(dic_webcache[name][0])]
             except: l =[]
             self.liste_cache = l
-            idc = webview.connect("resource-request-starting", self.resource_cache_cb)
+            idc = webview.connect("resource-request-starting",
+                                  self.resource_cache_cb)
             #dic_websignal[name]["resource-request-starting"] = idc
             self.add_signal_to_dic(name, "webcache", idc)
         
         if name in dic_webdownload:
-            idc = webview.connect("download-requested", self.download_requested_cb)
+            idc = webview.connect("download-requested",
+                                  self.download_requested_cb)
             #dic_websignal[name]["download-requested"] = idc
             self.add_signal_to_dic(name, "webdownload", idc)
         if name in l_weboverlink:
-            idc = webview.connect("hovering-over-link", self.hovering_over_link_cb)
+            idc = webview.connect("hovering-over-link",
+                                  self.hovering_over_link_cb)
             self.add_signal_to_dic(name, "weboverlink", idc)
             self.old_hovering_link = None
         return webview
@@ -1042,17 +1101,17 @@ class GuiWebkit(object):
         '''
         widget =  window or webview
         dic = { name: [[item, function, value],[....]],}
-        menu = gtk.Menu
+        menu = Gtk.Menu
         name = widget name
         '''
         for elem in dic[name]:
             item, function, value = elem
             if item == 'separator':
-                separator = gtk.SeparatorMenuItem()
+                separator = Gtk.SeparatorMenuItem()
                 menu.append( separator )
                 separator.show()
             else:
-                menuitem = gtk.MenuItem(label=item)
+                menuitem = Gtk.MenuItem(label=item)
                 menuitem.connect('activate', self.call_function_from_webmenu,
                             item, function, value, widget.get_pointer(), widget)
                 menu.append(menuitem)
@@ -1066,21 +1125,21 @@ class GuiWebkit(object):
     def append_submenuitem(self, widget, menuitem, dic, name, callback):
         '''
         widget =  window or webview
-        menuitem = gtk.MenuItem
+        menuitem = Gtk.MenuItem
         dic = { name: [[item, function, value],[....]],}
-        name = item of gtk.MenuItem
+        name = item of Gtk.MenuItem
         callback = fonction to call
         '''
-        menu = gtk.Menu()
+        menu = Gtk.Menu()
         for elem in dic[name]:
             item, function, value = elem
             if item == 'separator':
-                separator = gtk.SeparatorMenuItem()
+                separator = Gtk.SeparatorMenuItem()
                 menuitem.append( separator )
             else:
-                menuit = gtk.MenuItem(label=item)
-                menuit.connect('activate', callback,
-                                    item, function, value, widget.get_pointer(), widget)
+                menuit = Gtk.MenuItem(label=item)
+                menuit.connect('activate', callback, item, function, value,
+                                widget.get_pointer(), widget)
                 menu.append(menuit)
         menuitem.set_submenu(menu)
         menu.show_all()
@@ -1100,6 +1159,7 @@ class GuiWebkit(object):
                                    t_place, webview):
         webview.execute_script("getMyElementAtPoint('%s', '%s', '%s');" % \
                                                (value, t_place[0], t_place[1]))
+        #webview.execute_script("document.title=document.documentElement.innerHTML;")
         arg = webview.get_main_frame().get_title()
         webview.execute_script("document.title=oldTitle;")
         if import_py is not None:
@@ -1117,15 +1177,21 @@ class GuiWebkit(object):
             else:
                 self.send_data('%s GetLink@%s' % (name, uri) )
             return False
-        dialog = gtk.FileChooserDialog("Choose a destination", None, gtk.FILE_CHOOSER_ACTION_SAVE,
-        (gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_SAVE, gtk.RESPONSE_OK))
+        dialog = Gtk.FileChooserDialog("Choose a destination", None,
+                                       Gtk.FileChooserAction.SAVE,
+                                       (Gtk.STOCK_CANCEL,
+                                        Gtk.ResponseType.CANCEL,
+                                        Gtk.STOCK_SAVE,
+                                        Gtk.ResponseType.OK)
+                                      )
         dialog.set_current_name(os.path.basename(uri))
         try:
             dialog.set_current_folder(self.path_folder_download_selected)
         except: pass
-        if dialog.run() == gtk.RESPONSE_OK:
+        if dialog.run() == Gtk.ResponseType.OK:
             filename = dialog.get_uri()
-            self.path_folder_download_selected = os.path.dirname(filename.replace('file://',''))
+            self.path_folder_download_selected = \
+                             os.path.dirname(filename.replace('file://',''))
             if webdownload == 'UserChoose':
                 if import_py is not None:
                     getattr(self.th.IMPORT, name) ('UserChoose', uri, filename)
@@ -1175,7 +1241,7 @@ class GuiWebkit(object):
         base = path.split('/')[-1]
         try:
             pattern = dic_webrequest[name]
-            if pattern == 'All':
+            if pattern == 'ALL':
                 if import_py is not None:
                     getattr(self.th.IMPORT, name) ('request', base)
                 else:
@@ -1188,7 +1254,8 @@ class GuiWebkit(object):
                 request.set_uri('about:blank')
         except: pass
 
-    def nav_request(self, webview, frame, request, navigation_action, policy_decision):
+    def nav_request(self, webview, frame, request, navigation_action,
+                    policy_decision):
         uri  = request.get_uri()
         name = webview.get_name()
         try:
@@ -1253,14 +1320,13 @@ class GuiXmlParser(object):
                 if USERLIB == 'object':
                     wid = eval('self.%s' % name)
                     wid.set_name(name)
-                DEBUG('[[ WIDGETS ]] ====>>>> %s' % name)
                 try:
                     getattr(self, widget)(name)
-                except: pass
-                #except TypeError,e:
-                    #print "Unexpected error:",e
+                except:
+                    pass
             for child in node.childNodes:
-                if (child.nodeType == child.TEXT_NODE or not child.hasAttributes() 
+                if (child.nodeType == child.TEXT_NODE 
+                    or not child.hasAttributes() 
                     or child.nodeName == "child"): continue
                 child_name = child.attributes['name'].value
                 try:
@@ -1268,8 +1334,9 @@ class GuiXmlParser(object):
                     if child_name in child2ref: # launch function modif dico
                         getattr(self, child_name)(name, child_data)
                 except:
+                    if child_name in child2ref: raise
                     pass
-                if child_name == 'drag_drop':
+                if child_name in ('drag-drop','drag_drop'):
                     self.set_drag_drop(name)
 
     def GtkTextView(self, nom):
@@ -1313,12 +1380,10 @@ class GuiXmlParser(object):
             self.make_treeview(nom, treeview)
         except ValueError, e: 
             DEBUG('==== [[ ERROR ]] ===>> %s' % e)
-        treeview.enable_model_drag_source( gtk.gdk.BUTTON1_MASK,
-                                                self.CIBLES,
-                                                gtk.gdk.ACTION_DEFAULT|
-                                                gtk.gdk.ACTION_MOVE)
-        treeview.enable_model_drag_dest( self.CIBLES,
-                                            gtk.gdk.ACTION_DEFAULT)
+        treeview.enable_model_drag_dest([], DRAG_ACTION_MOVE)
+        treeview.enable_model_drag_source(DRAG_BTN_MASK, [], DRAG_ACTION_MOVE)
+        treeview.drag_dest_add_text_targets()
+        treeview.drag_source_add_text_targets()
 
     def GtkStatusbar(self, nom):
         exec("self.context_%s = self.%s.get_context_id('context_description')" % (nom,nom) )
@@ -1332,8 +1397,8 @@ class GuiXmlParser(object):
 
     def GtkComboBoxEntry(self, nom):
         exec( 'combo=self.%s' % (nom) )
-        combo.child.set_name('%s_entry' % nom)
-        setattr(self, '%s_entry' % nom, combo.child)
+        combo.get_child().set_name('%s_entry' % nom)
+        setattr(self, '%s_entry' % nom, combo.get_child())
         try:
             self.make_combo(nom, combo)
         except ValueError, e: 
@@ -1361,7 +1426,7 @@ class GuiTreeview(object):
         FBF = ['FONT', 'BACK', 'FORE']
         dic_elem_entet = {'FONT':'str', 'BACK':'str', 'FORE':'str', 'CHECK':'bool',
                           'RADIO':'bool', 'PROGRESS':'int', 'HIDE':'str', 'FORE':'str',
-                          'COMBO':'str', 'ICON':'str', 'IMG':'gtk.gdk.Pixbuf' }
+                          'COMBO':'str', 'ICON':'str', 'IMG':'GdkPixbuf.Pixbuf' }
         liste_treeview =  dic_treeview[name]
         #ref = ICON|colonne
         ref=liste_treeview.pop(0)
@@ -1386,7 +1451,7 @@ class GuiTreeview(object):
         DEBUG('[[ TREEVIEW ]] => %s colonnes' % n)
         
         var=','.join(store_base)
-        exec( 'self.store_%s= gtk.TreeStore(%s)' % (name,var) )
+        exec( 'self.store_%s= Gtk.TreeStore(%s)' % (name,var) )
         exec( 'mystore=self.store_%s' % (name) )
         l = []
         for ent in liste_base:
@@ -1421,11 +1486,10 @@ class GuiTreeview(object):
         DEBUG('[[ TREEVIEW ]] ==> Image %s' % num_col)
         self.ICON(name, treeview, mystore, num_col, l_value, titre, False)
 
-    def ICON(self, name, treeview, mystore, num_col, l_value, titre,
-             flag_icon=True):
+    def ICON(self, name, treeview, mystore, num_col, l_value, titre, flag_icon=True):
         DEBUG('[[ TREEVIEW ]] ==> Icon %s' % num_col)
         CLIC = False
-        render = gtk.CellRendererPixbuf()
+        render = Gtk.CellRendererPixbuf()
         for lm in l_value:
             try:  # if it is a number
                 size = int(lm)
@@ -1438,29 +1502,28 @@ class GuiTreeview(object):
                 else:
                     titre=lm
         if flag_icon:
-            col = gtk.TreeViewColumn(titre, render, icon_name=num_col)
-        else: col = gtk.TreeViewColumn(titre, render, pixbuf=num_col)
+            col = Gtk.TreeViewColumn(titre, render, icon_name=num_col)
+        else: col = Gtk.TreeViewColumn(titre, render, pixbuf=num_col)
         if CLIC:
-            treeview.connect_after('cursor-changed', self.rappel_clic, col,
-                                   name, num_col)
+            treeview.connect_after('cursor-changed', self.rappel_clic, col, name, num_col)
         treeview.append_column(col)
         return True
 
     def CHECK(self, name, treeview, mystore, num_col, l_value, titre):
         DEBUG('[[ TREEVIEW ]] ==> Check %s' % num_col)
         if l_value: titre = l_value[0]
-        render = gtk.CellRendererToggle()
+        render = Gtk.CellRendererToggle()
         render.connect('toggled', self.rappel_toggled, mystore, num_col, name)
-        col = gtk.TreeViewColumn(titre, render, active=num_col)
+        col = Gtk.TreeViewColumn(titre, render, active=num_col)
         treeview.append_column(col)
 
     def RADIO(self, name, treeview, mystore, num_col, l_value, titre):
         DEBUG('[[ TREEVIEW ]] ==> Radio %s' % num_col)
         if l_value: titre = l_value[0]
-        render = gtk.CellRendererToggle()
+        render = Gtk.CellRendererToggle()
         render.set_property('radio',True)
         render.connect('toggled', self.rappel_radio, mystore, num_col, name)
-        col = gtk.TreeViewColumn(titre,render,active=num_col)
+        col = Gtk.TreeViewColumn(titre,render,active=num_col)
         treeview.append_column(col)
         self.DIC_RADIO[num_col]=0
 
@@ -1476,16 +1539,16 @@ class GuiTreeview(object):
                 except:
                     pass
             liste_combo = [ [i] for i in l_value ]
-        store_combo = gtk.ListStore(str)
+        store_combo = Gtk.ListStore(str)
         for li in liste_combo:
             store_combo.append(li)
-        render = gtk.CellRendererCombo()
+        render = Gtk.CellRendererCombo()
         render.set_property('model',store_combo)
         render.set_property('text-column', 0)
         render.set_property('editable',True)
         render.connect('edited', self.rappel_edited, name, mystore, num_col,
                                                             'combo',treeview)
-        col=gtk.TreeViewColumn(titre, render, text=num_col)
+        col=Gtk.TreeViewColumn(titre, render, text=num_col)
         try:
             col_font = self.dic_entet['FONT']
             col.add_attribute(render,'font', col_font)
@@ -1495,7 +1558,7 @@ class GuiTreeview(object):
 
     def PROGRESS(self, name, treeview, mystore, num_col, l_value, titre):
         DEBUG('[[ TREEVIEW ]] ==> Progressbar %s' % num_col)
-        render = gtk.CellRendererProgress()
+        render = Gtk.CellRendererProgress()
         if l_value:
             for lm in l_value:
                 try:
@@ -1504,12 +1567,12 @@ class GuiTreeview(object):
                     DEBUG('[[ TREEVIEW ]] => Progress > size %s'% size)
                 except:
                     titre = lm
-        col = gtk.TreeViewColumn(titre, render, value=num_col)
+        col = Gtk.TreeViewColumn(titre, render, value=num_col)
         treeview.append_column(col)
 
     def TEXT(self, name, treeview, mystore, num_col, l_value, titre):
         DEBUG('[[ TREEVIEW ]] ==> Texte %s' % num_col)
-        render = gtk.CellRendererText()
+        render = Gtk.CellRendererText()
         size = None
         self.column_sizing = True
         if l_value:
@@ -1528,7 +1591,7 @@ class GuiTreeview(object):
                         self.col_edit = num_col
                         DEBUG('[[ TREEVIEW ]] => Texte > editable %s'% num_col)
         #else: titre=elem
-        col=gtk.TreeViewColumn(titre,render,markup=num_col)
+        col=Gtk.TreeViewColumn(titre,render,markup=num_col)
         try:
             col_font = self.dic_entet['FONT']
             col.add_attribute(render,'font', col_font)
@@ -1548,7 +1611,7 @@ class GuiTreeview(object):
         col.set_sort_column_id(num_col)
         treeview.append_column(col)
         sel=treeview.get_selection()
-        sel.set_mode(gtk.SELECTION_SINGLE)
+        sel.set_mode(Gtk.SelectionMode.SINGLE)
 
     def HIDE(self, name, treeview, mystore, num_col, l_value, titre):
         DEBUG('[[ TREEVIEW ]] ==> hide %s'% num_col)
@@ -1570,18 +1633,28 @@ class GuiTreeview(object):
     '''        
     def rappel_clic(self, widget, tree_column, tree_name, num_col):
         self.th.iter_select = ' '
-        if widget.get_cursor()[1] == tree_column:  # si la colonne est régler sur clic
+        # si la colonne est régler sur clic
+        if widget.get_cursor()[1] == tree_column:  
             list_str = self.th.retourne_selection(tree_name)
+            print list_str
             if import_py is not None:
                 list_str.prepend(num_col)
                 t = ( (num_col, list_str[0]), list_str[1], 'clic' )
                 getattr(self.IMPORT, tree_name)(*t)
                 return True
             liste    = list_str.split('@')
+            print liste
             arg='%s,%s' % (liste.pop(0), num_col)
-            list_str_re = '|'.join(liste)
-            var = '%s clic@%s@%s' % (tree_name, arg, list_str_re)
-            self.send_data( var )
+            #list_str_re = '|'.join(liste)
+            #~FIXME encodage utf8 unicode
+            l='%s'%liste[0]
+            var = '%s clic@%s@%s' % (tree_name, arg, liste[0])
+            #var = '%(tree_name)s clic@%(arg)s@%(liste)s' % locals()
+            #var = tree_name+' clic@'+arg+'@'+list_str.decode('utf8')
+            try:
+                self.send_data(var)
+            except:
+                self.send_data( var.encode('utf8') )
         return True
     
     def rappel_radio(self, cellrender, path, store, col, name_tree):
@@ -1627,17 +1700,24 @@ class GuiTreeview(object):
                                          mystore, col, style, treeview):
         ancien_texte = mystore[chemin][col]
         mystore[chemin][col] = nouveau_texte
-        ligne = self.th.list_to_string( list(mystore[chemin]) )
+        #ligne = self.th.list_to_string( list(mystore[chemin]) )
+        ligne = '|'.join( map(str, list(mystore[chemin]) ))
         if import_py is not None:
             getattr(self.th.IMPORT, tree_name) ( 
                                         (col, chemin),
                                         (ancien_texte, ligne ),
                                         style,
                                                 )
-        else:
-            val   = '%s %s@%s,%s@%s@%s' % (tree_name, style, chemin ,col,
-                                                         ancien_texte, ligne)
-            self.send_data( val )
+        else: #~FIXME encodage utf8 unicode
+            try:
+                val   = '%s %s@%s,%s@%s@%s' % (tree_name, style, chemin ,col,
+                                                ancien_texte, ligne)
+                self.send_data(val)
+            except:
+                val   = '%s %s@%s,%s@%s@%s' % (tree_name, style, chemin ,col,
+                                                ancien_texte.decode('utf8'), 
+                                                ligne.decode('utf8'))
+                self.send_data( val.encode('utf8') )
         if self.column_sizing: treeview.columns_autosize()
 
     '''
@@ -1651,11 +1731,12 @@ class GuiTreeview(object):
         name  = treeview.get_name()
         info  = treeview.get_path_at_pos(x, y)
         if info is None: return False  #If nothing in this position, we do not display
-        line    = info[0][0]
+        line    = info[0].get_indices()[0] - 1
+        #print info, line
         column  = info[1]
         columns = treeview.get_columns()  # gets all columns
         col     = columns.index(column)  # column number
-        tuple_size     = column.cell_get_size()[4]  # column size 4 = cell height
+        tuple_size = column.cell_get_size(None)[1]  # column size 4 = cell height
         self.size_cell = tuple_size
         if line == -1 or col == -1: return False # If we are outside
         colonne = col # save num column
@@ -1680,7 +1761,6 @@ class GuiTreeview(object):
     *** Drag & drop management ***
     ******************************
     '''
-    
     def return_selection(self, treeview):
         name          = treeview.get_name()
         modele, iter  = treeview.get_selection().get_selected()
@@ -1695,8 +1775,15 @@ class GuiTreeview(object):
         '''
         name, modele, iter, row = self.return_selection(treeview)
         text = '''%s %s''' % (name, str(row))
-        #selection.set_text(text, -1)
-        selection.set(selection.target, 8, text )
+        selection.set_text(text, -1)
+        return
+        treeselection = treeview.get_selection()
+        name = treeview.get_name()
+        #treeselection.set_mode(Gtk.SelectionMode.MULTIPLE)
+        modele, iter  = treeselection.get_selected()
+        donnees       = list(modele[iter])
+        texte = ''
+        selection.set(selection.target, 8, name+' '+str(donnees) )
 
     def drag_data_received(self, treeview, context, x, y, selection,
                                 info, etime):  # deposit into a treeview
@@ -1707,14 +1794,14 @@ class GuiTreeview(object):
         
         iter_to_copy = False
         model = treeview.get_model()
-        name = selection.data.rstrip()
+        name = selection.get_text()
         info_depot = treeview.get_dest_row_at_pos(x, y)
         try:
             tree_source  = getattr(self, name.split(' ')[0])
             ns, model_source, iter_to_copy, row_s = \
                                          self.return_selection(tree_source)
         except:
-            row_s=[name]
+            row_s=[name]        
         if info_depot: # if we are between the treeview lines
             chemin, position = info_depot
             iter = model.get_iter(chemin)
@@ -1726,13 +1813,13 @@ class GuiTreeview(object):
                 self.add_iter_to_tree(model, iter, row_s, position)
         else: # drop in a empty tree
             model.append(None, row_s)       
-        if context.action == DRAG_ACTION_MOVE:
+        if context.get_suggested_action() == DRAG_ACTION_MOVE:
             context.finish(True, True, etime)
             
         def check_path(model, path, iter, don): #search drop emplacement
             if list(model[iter]) == don[0]:
-                DEBUG( '[[ D & D ]] => Find item, path: %s'% path[0])
-                don[1].append(path)
+                DEBUG( '[[ D & D ]] => Find item, path: %s'% path)
+                don[1].append(path.to_string())
         lref = []
         model.foreach(check_path, (row_s, lref) )
         chemin = lref[0]
@@ -1747,7 +1834,7 @@ class GuiTreeview(object):
         self.send_data( '%s drop@%s@%s' % (  
                                           treeview.get_name(),
                                           chemin,
-                                          lt,
+                                          lt.encode('utf8'),
                                           )
                       )
    
@@ -1769,7 +1856,8 @@ class GuiTreeview(object):
             for i in range(0, model_source.iter_n_children(iter_to_copy)):
                 next_iter_to_copy = model_source.iter_nth_child(iter_to_copy, i)
                 self.iter_copy(model_source, model, next_iter_to_copy,
-                               new_iter, DRAG_INTO_OR_BEFORE)    
+                              new_iter, DRAG_INTO_OR_BEFORE)    
+
 
 class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
     '''
@@ -1780,12 +1868,6 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
     *** UI CREATION
     *****************************************
     '''
-    CIBLES = [
-        ('MY_TREE_MODEL_ROW', gtk.TARGET_SAME_WIDGET, 0),
-        ('text/plain', 0, 1),
-        ('TEXT', 0, 2),
-        ('STRING', 0, 3),
-        ]
     DIC_RADIO={}
     def __init__(self):
         self.dic_widget        = {}
@@ -1794,7 +1876,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         self.tooltip_line      = -1
         self.send_drop         = True
         self.flag_tooltip      = False
-        self.window_realized   = False
+        self.window_realized   = True
         self.flag_right_clic   = False
         self.var_filechoose    = None
         self.old_label_tooltip = None
@@ -1804,14 +1886,14 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         if os.path.exists(local_path):  # charger traduction
             if USERLIB == 'widget':
                 DEBUG('[[ GTK LIB ]] ==> libglade > locale')
-                gtk.glade.bindtextdomain(nom_appli, local_path)
-                gtk.glade.textdomain(nom_appli)
+                Gtk.glade.bindtextdomain(nom_appli, local_path)
+                Gtk.glade.textdomain(nom_appli)
                 gettext.install(nom_appli)
-                self.widgets = gtk.glade.XML(fname=f_glade, domain=nom_appli)
+                self.widgets = Gtk.glade.XML(fname=f_glade, domain=nom_appli)
                 self.widgets.signal_autoconnect(self)
             else:
                 DEBUG('[[ GTK LIB ]] ==> GtkBuilder > locale')
-                self.widgets = gtk.Builder()
+                self.widgets = Gtk.Builder()
                 import locale
                 locale.setlocale(locale.LC_ALL, '')
                 locale.bindtextdomain(nom_appli, local_path)
@@ -1828,12 +1910,12 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         else:
             if USERLIB == 'object':
                 DEBUG('[[ GTK LIB ]] ==> GtkBuilder')
-                self.widgets = gtk.Builder()
+                self.widgets = Gtk.Builder()
                 self.widgets.add_from_file(f_glade)
                 self.widgets.connect_signals(self)
             else:
                 DEBUG('[[ GTK LIB ]] ==> libglade')
-                self.widgets = gtk.glade.XML( f_glade )
+                self.widgets = Gtk.glade.XML( f_glade )
                 self.widgets.signal_autoconnect(self)
         if systray_icon:
             DEBUG('[[ SYSTRAY ]]')
@@ -1841,16 +1923,14 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
 
         if clip is not None:
             DEBUG('[[ CLIPBOARD ]]')
-            display = gtk.gdk.display_manager_get().get_default_display()
-            self.clipboard = gtk.Clipboard(display, clip)
+            self.clipboard = Gtk.Clipboard.get(eval('Gdk.SELECTION_%s'%clip))
         self.parse_xml()
-        
         if dic_trans:
             self.widgets_trans()
 
         if term_box is not None:
-            DEBUG('[[ TERMINAL ]]')
             self.make_terminal()
+            DEBUG('[[ TERMINAL ]]')
         
         if embed is not None:
             DEBUG('[[ EMBED ]]')
@@ -1862,7 +1942,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
             DEBUG('[[ WEBKIT ]]')
             for nav in l_webkit:
                 self.make_navigateur(nav[0], nav[1])
-
+        
         if dic_sourceview:
             for name, box in dic_sourceview.iteritems():
                 DEBUG('[[ SOURCEVIEW ]] ==>> %s, %s' % (name, box))
@@ -1870,21 +1950,24 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         
         if auto_config is not None:
             DIC_ENV.update( CONFIG_PARSER.load_config(self) )
+            self.window_realized = False
             
         if load_config is not None and auto_config is None:
             DIC_ENV.update( CONFIG_PARSER.get_config(self) )
         
+        if lock_cb: self.window_realized = False
+    
     '''
     ************************
     ***   GtkSourceView   ***
     ************************
     '''
     def add_sourceview(self, name, box):
-        box    = getattr(self, box)
-        style  = gtksourceview2.StyleSchemeManager()
-        lang   = gtksourceview2.LanguageManager()
-        buffer = gtksourceview2.Buffer()
-        view   = gtksourceview2.View()
+        box  = getattr(self, box)
+        style = GtkSource.StyleSchemeManager()
+        lang = GtkSource.LanguageManager()
+        buffer = GtkSource.Buffer()
+        view = GtkSource.View()
         view.set_property('name', name)
         view.set_buffer(buffer)
         setattr(self, name, view)
@@ -1894,47 +1977,53 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         view.show()
         DIC_ENV['G2S_SOURCEVIEW_LANG']  = ','.join(lang.get_language_ids())
         DIC_ENV['G2S_SOURCEVIEW_STYLE'] = ','.join(style.get_scheme_ids())
+        
     '''
     ************************
     ***   Transparency   ***
     ************************
     '''
     def widgets_trans(self):
+        
         for widget_name in dic_trans:
             widget = eval('self.%s' % widget_name)
-            widget.connect('expose-event', self.expose)
-            widget.set_colormap( self.get_screen_colormap(widget) )
+            #widget.connect('draw', self.expose)
+            #widget.connect('configure-event', self.expose)
+            widget.set_visual( self.get_screen_colormap(widget) )
             widget.set_app_paintable(True) 
-            widget.realize()
+            #widget.realize()
 
     def get_screen_colormap(self, window):
         screen   = window.get_screen()
-        colormap = screen.get_rgba_colormap()
+        colormap = screen.get_rgba_visual()
         if colormap == None:
-            colormap = screen.get_rgb_colormap()
+            colormap = screen.get_system_visual()
         return colormap
 
-    def expose(self, window, event):
-        if window.is_composited():
-            name = window.get_name()
-            trans, color = dic_trans[name]
-            #print dic_trans
-            try:
-                eval(color) # si eval passe, color = None, donc defaut noir
-                r, g, b = (0.0, 0.0, 0.0)
-            except:
-                r, g, b = self.get_rgb_color(color)
-            try:
-                trans = float(trans)
-            except:
-                trans = eval(trans)
-            cr = window.window.cairo_create()
-            if trans is not None:
-                cr.set_source_rgba(r, g, b, trans )
-            else:
-                cr.set_source_rgba(r, g, b, 0.0)
-            cr.set_operator(cairo.OPERATOR_SOURCE)
-            cr.paint()
+    def expose(self, window, cr):
+        #if window.is_composited():
+        print 'expose'
+        while not window.is_composited():
+            time.sleep(0.5)
+        name = window.get_name()
+        trans, color = dic_trans[name]
+        #print dic_trans
+        try:
+            eval(color) # si eval passe, color = None, donc defaut noir
+            r, g, b = (0.0, 0.0, 0.0)
+        except:
+            r, g, b = self.get_rgb_color(color)
+        try:
+            trans = float(trans)
+        except:
+            trans = eval(trans)
+        #cr = window.window.cairo_create()
+        if trans is not None:
+            cr.set_source_rgba(r, g, b, trans )
+        else:
+            cr.set_source_rgba(r, g, b, 0.0)
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.paint()
 
     def get_rgb_color(self, full):
         """  split_col(full=24 bit color value) return tuple of three colour values being 0-1.
@@ -1952,7 +2041,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
     *********************************
     '''
     def make_combo(self, nom, combo):
-        DEBUG('[[ COMBO ]] ==> Start make')
+        #DEBUG('[[ COMBO ]] ==> %s' % nom)
         icon = False
         try:
             liste = dic_combo[nom]
@@ -1968,12 +2057,12 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         if icon:
             self.add_icon_on_combo(item, icon, combo, liste)
             return
-        liststore = gtk.ListStore(str)
+        liststore = Gtk.ListStore(str)
         combo.set_model(liststore)
-        cell = gtk.CellRendererText()
+        cell = Gtk.CellRendererText()
         combo.pack_end(cell, True)
         combo.add_attribute(cell, 'markup', 0)
-        DEBUG('[[ COMBO ]] ==> Label')
+        #DEBUG('[[ COMBO ]] ==> Label')
         if liste:
             for item in liste:
                 liststore.append( [item] )
@@ -1982,9 +2071,9 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
     def add_icon_on_combo(self, item, icon, combo, liste):
         if 'ICON' in icon:
             DEBUG('[[ COMBO ]] ==> Icon')
-            liststore = gtk.ListStore(str, str)
+            liststore = Gtk.ListStore(str, str)
             combo.set_model(liststore)
-            cell = gtk.CellRendererPixbuf()
+            cell = Gtk.CellRendererPixbuf()
             try:
                 # si il y a un argument
                 arg, size = icon.split('%%')
@@ -2001,9 +2090,9 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         elif 'IMG' in icon:
             DEBUG('[[ COMBO ]] ==> Image')
             size      = False
-            liststore = gtk.ListStore(str, gtk.gdk.Pixbuf)
+            liststore = Gtk.ListStore(str, GdkPixbuf.Pixbuf)
             combo.set_model(liststore)
-            cell = gtk.CellRendererPixbuf()
+            cell = Gtk.CellRendererPixbuf()
             try:
                 arg, size = icon.split('%%')
                 size=int(size)
@@ -2014,16 +2103,16 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
                 for item in liste:
                     item, filename = item.split('|')
                     if size:
-                        pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, size, size)
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, size, size)
                     else:
-                        pixbuf = gtk.gdk.pixbuf_new_from_file(filename)
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_file(filename)
                     liststore.append( [item, pixbuf] )
                 DEBUG('[[ COMBO ]] ==> Loaded')
 
     def pack_cells(self, cell, combo, arg):
         combo.pack_start(cell, False)
         combo.add_attribute(cell, arg, 1)
-        cell = gtk.CellRendererText()
+        cell = Gtk.CellRendererText()
         combo.pack_end(cell, True)
         combo.add_attribute(cell, 'markup', 0)
         DEBUG('[[ COMBO ]] ==> Label')
@@ -2043,8 +2132,18 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         '''
         self.flag_term    = True
         self.flag_event   = True
-        self.terminal     = vte.Terminal()
-        self.terminal_PID = self.terminal.fork_command()
+        self.terminal     = Vte.Terminal()
+        self.terminal_PID = []
+        self.terminal.fork_command_full(
+                                       Vte.PtyFlags.DEFAULT,
+                                       os.environ['HOME'],
+                                       ["/bin/sh"],
+                                       [],
+                                       GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+                                       None,
+                                       None,
+                                       )
+        #self.terminal_PID = self.terminal.fork_command()
         DIC_ENV['G2S_TERMINAL_PID'] = str(self.terminal_PID)
         lbox, size = term_box.split(':')
         self.term_width, self.term_height = size.split('x')
@@ -2052,7 +2151,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         box.pack_start(self.terminal,False, True, 0)
         if term_redim:
             self.terminal.connect('char-size-changed',
-                                   self.redim_container_from_font) 
+                                         self.redim_container_from_font) 
             self.terminal.connect('status-line-changed', self.child_exited)
         if term_font is not None:
             self.terminal.set_font_from_string(term_font)
@@ -2071,10 +2170,10 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         '''
         pere  = widget.get_parent()
         Gpere = pere.get_parent()
-        if type(Gpere ) == gtk.Viewport:
+        if type(Gpere ) == Gtk.Viewport:
             container_width  = width * widget.get_column_count()
             container_height = height * widget.get_row_count()
-            gobject.idle_add(Gpere.set_size_request, container_width,
+            GObject.idle_add(Gpere.set_size_request, container_width,
                              container_height)
             self.flag_term = True
     
@@ -2087,34 +2186,31 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         Callback of the size-allocate signal of the viewport.
         When the widget is resized
            widget = viewport
-           rect = gtk.rectangle
+           rect = Gtk.rectangle
         '''
         # Loads the dimensions for calculous base and default values,
         # resizes viewport and terminal, only once at the beginning.
         # Reinitialized during the fonts change thanks to the flag
         if self.flag_term: # flag to avoid the first signal
             self.flag_term = False
-            self.defaut_width = int(self.term_width)
-            self.defaut_hight = int(self.term_height)
+            self.defaut_width, self.defaut_hight = int(self.term_width),int(self.term_height)
             self.col_size  = self.terminal.get_char_width()
             self.line_size = self.terminal.get_char_height()
             nb_col  = self.defaut_width / self.col_size
             nb_line = self.defaut_hight / self.line_size
-            gobject.idle_add(self.terminal.set_size, nb_col, nb_line)
+            GObject.idle_add(self.terminal.set_size, nb_col, nb_line)
             self.old_nb_col, self.old_nb_row = nb_col, nb_line 
-            gobject.idle_add(widget.set_size_request, self.defaut_width,
-                             self.defaut_hight)
+            GObject.idle_add(widget.set_size_request, self.defaut_width, self.defaut_hight)
             return
-        x, y, w, h = list(rect)
+        x, y, w, h = (rect.x, rect.y, rect.width, rect.height)
+        #x, y, w, h = list(rect)
         # col and row number for the new size
-        new_w = int(float(w)/float(self.col_size))
-        new_h = int(float(h)/float(self.line_size))
+        new_w, new_h = int(float(w)/float(self.col_size)), int(float(h)/float(self.line_size))
         # if a dimension is changed
         if new_w != self.old_nb_col or new_h != self.old_nb_row: 
-            # flag to avoid the first signal
-            if self.flag_event: self.flag_event = False 
+            if self.flag_event: self.flag_event = False # flag to avoid the first signal
             else: 
-                gobject.idle_add(self.terminal.set_size, new_w, new_h )
+                GObject.idle_add(self.terminal.set_size, new_w, new_h )
         self.old_nb_col, self.old_nb_row = new_w, new_h
 
     '''
@@ -2122,7 +2218,6 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
     *** Drag & drop management ***
     ******************************
     '''
-    
     def set_drag_drop(self, nom):
         dd    = eval( "self.%s" % (nom) )
         dd.connect("drag-data-received", self.event_drag_data_received)
@@ -2131,6 +2226,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         dd.drag_source_set(DRAG_BTN_MASK, [], DRAG_ACTION_MOVE)
         dd.drag_dest_add_text_targets()
         dd.drag_source_add_text_targets()
+        return
     
     def event_drag_data_get(self, widget, drag_context, data, info, time):
         text = "%s@drag" % widget.get_name()
@@ -2147,7 +2243,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
 
     def event_drag_data_received(self, widget, context, x, y, selection,
                                 info, etime):  # deposit in a widget
-        data = selection.data.rstrip()
+        data = selection.get_text()
         try: # if it comes from a treeview, convert into string
             source_name, source_row = data.split(' ',1)
             data  = eval(source_row)
@@ -2157,11 +2253,11 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         if import_py is not None:
             getattr(self.th.IMPORT, widget.get_name())('drop',data)
         else:
-            self.send_data( '%s %s' % (widget.get_name(), selec) )
+            self.send_data( '%s %s' % (widget.get_name(), selec.encode('utf8')) )
         
-        if context.action == DRAG_ACTION_MOVE:
+        if context.get_suggested_action() == DRAG_ACTION_MOVE:
             context.finish(True, True, etime)
-    
+
     '''
     *********************
     *** Miscellaneous ***
@@ -2172,7 +2268,7 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
             self.new_systray_icon(name, menu, icon, bulle)
     
     def new_systray_icon(self, name, menu, icon, bulle):
-        systray = gtk.StatusIcon()
+        systray = Gtk.StatusIcon()
         systray.props.visible = False
         if '.' in icon:
             systray.set_from_file(icon)
@@ -2182,21 +2278,31 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
             menu = eval('self.widgets.get_%s' % USERLIB)(menu) 
             systray.connect('popup-menu', self.popup_menu_cb, menu)
         systray.connect('activate', self.send_data, name)
-        systray.set_tooltip(bulle)
         setattr(self, name, systray)
 
     def popup_menu_cb(self, widget, button, time, menu=None):
         if button == 3:
             if menu:
                 menu.show()
-                menu.popup(None, None, gtk.status_icon_position_menu,
-                                                     3, time, widget)
+                menu.popup(None, None, widget.position_menu, widget, 3, time)
+                #menu.popup(None, None, Gtk.status_icon_position_menu,
+                #                                     3, time, widget)
 
     def apply_gtkrc(self, widget, gtkrc):
-        gtk.rc_parse(gtkrc)
-        screen   = widget.get_screen()
-        settings = gtk.settings_get_for_screen(screen)
-        gtk.rc_reset_styles(settings)
+        screen = Gdk.Screen.get_default()
+        provider = Gtk.CssProvider()
+        provider.load_from_path(gtkrc)
+        context = Gtk.StyleContext()
+        context.add_provider_for_screen(screen, provider,
+                                        Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        return
+        #~FIXME can't do it for single widget/window
+        context = widget.get_style_context()
+        provider = Gtk.CssProvider()
+        #provider.load_from_data(file(gtkrc,'r').read())
+        provider.load_from_path(gtkrc)
+        context.add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        print 'gtkrc',gtkrc
 
     def modif_type(self, ligne, store):
         list_ligne = ligne.split('|')
@@ -2205,7 +2311,10 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
             if 'gchararray' in str(store.get_column_type(n)):
                 value = elem
             else:
-                value = eval(elem)
+                try:
+                    value = eval(elem)
+                except:
+                    value = elem
             index = list_ligne.index(elem)
             list_ligne[index] = value
             n+=1
@@ -2225,12 +2334,16 @@ class Gui(Callbacks, GuiWebkit, GuiXmlParser, GuiTreeview):
         exec( arg )
 
     def set_color(self, widget, etat, color):
-        couleur = gtk.gdk.color_parse(color)
+        #~FIXME couleur = Gdk.RGBA.parse(color)
+        rgba = Gdk.RGBA()
+        couleur = rgba.parse(color)
+        #self._entry_color.override_color(Gtk.StateFlags.NORMAL,rgba)
+        #getattr(self, widget)(eval(etat), rgba)
         widget  = eval( 'self.%s' % (widget) )
-        widget(eval(etat), couleur)
+        widget(eval(etat), rgba)
 
     def main(self):
-        gtk.main()
+        Gtk.main()
 
 
     '''
@@ -2252,7 +2365,7 @@ class CmdCOMBO(object):
                 item = None
             combo, modele = self.return_tree_store(name)
             nb = len(modele)
-            gobject.idle_add(getattr(self, cmd), nb, combo, modele, item)
+            GObject.idle_add(getattr(self, cmd), nb, combo, modele, item)
 
     def COMBOIMG(self, nb, combo, modele, item):
         '''
@@ -2264,10 +2377,10 @@ class CmdCOMBO(object):
         '''
         try:
             item, filename, size = item.split('|')
-            pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, int(size), int(size) )
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, int(size), int(size) )
         except:
             item, filename = item.split('|')
-            pixbuf = gtk.gdk.pixbuf_new_from_file(filename)
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(filename)
         modele.append( [item, pixbuf] )
 
     def COMBOEND(self, nb, combo, modele, item):
@@ -2285,8 +2398,7 @@ class CmdCOMBO(object):
         @param @@combobox[,combobo,...]
         @brief Deletes all the elements of the combobox
         '''
-        for i in range(nb):
-            combo.remove_text(0)
+        modele.clear()
 
     def COMBOFINDDEL(self, nb, combo, modele, item):
         '''
@@ -2295,11 +2407,9 @@ class CmdCOMBO(object):
         @brief Deletes one combobox element by its item.
         @info item: Regular expression
         '''
-        liste = []
-        modele.foreach(self.find_tree_item, ('0', item, liste) )
-        #combo.set_active( liste[0] )
+        liste = self.find_tree_item(modele, '0', item)
         try:
-            del modele[ liste[0] ]
+            del modele[ liste[0].path ]
         except: pass
 
     def COMBOFINDSELECT(self, nb, combo, modele, item):
@@ -2309,15 +2419,24 @@ class CmdCOMBO(object):
         @brief Selects a combobox element by its item.
         @info item: Regular expression
         '''
-        liste = []
-        modele.foreach(self.find_tree_item, ('0', item, liste) )
-        current_active = combo.get_active()
-        try:
-            if current_active == liste[0][0]:
-                self.gui.on_combo(combo)
-                return
-            combo.set_active( liste[0][0] )
-        except: pass
+        liste = self.find_tree_item(modele, '0', item)
+        if not liste: return
+        iter_active = combo.get_active_iter()
+        iter = modele.get_iter(liste[0].path)
+        if iter_active == iter:
+            self.gui.on_combo(combo)
+            return
+        #~FIXME set_active(path) do not work !
+        combo.set_active_iter(iter)
+    
+    def COMBODEL(self, nb, combo, modele, item):
+        '''
+        @name COMBO@@DEL
+        @param @@combobox@@LineNumber
+        @brief Deletes the element of the combobox by its number line.
+        '''
+        iter = modele.get_iter(item)
+        modele.remove(iter)
 
     def COMBODELEND(self, nb, combo, modele, item):
         '''
@@ -2327,7 +2446,9 @@ class CmdCOMBO(object):
         '''
         # minus because the input number is higher than the real one
         nb = nb -1
-        combo.remove_text(nb)
+        row = modele[nb]
+        iter = modele.get_iter(nb)
+        modele.remove(iter)
 
 
 class CmdTREEVIEW(object):
@@ -2336,7 +2457,7 @@ class CmdTREEVIEW(object):
     '''
     def TREE(self, sortie, arg=False):
         cmd='TREE%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def TREEINSERT(self, sortie):
         '''
@@ -2347,7 +2468,7 @@ class CmdTREEVIEW(object):
         @info line: path (1 or 1:0)
         @info data: text|text|text
         '''
-        name, path, value = sortie.split('@@')[2:]
+        name, path, value = sortie.split('@@',4)[2:]
         treeview, mystore = self.return_tree_store(name)
         iter, path = self.gui.try_path(path, mystore)    
         mystore.insert(iter, int(path), self.gui.modif_type(value, mystore) )
@@ -2367,11 +2488,13 @@ class CmdTREEVIEW(object):
             for ligne in file(path,'r'):
                 ligne    = ligne.strip()
                 liste    = self.gui.modif_type(ligne, mystore)
+                #liste = map(str, ligne.rstrip().split('|'))
                 #print liste
                 position = liste[0]
                 parent_iter, path = self.gui.try_path(position, mystore)
                 mystore.append(parent_iter, liste)
         except ValueError, e: 
+            if not ligne: return
             DEBUG('==== [[ ERROR ]] ===>> %s' % e)
 
     def TREEGET(self, sortie):
@@ -2391,15 +2514,18 @@ class CmdTREEVIEW(object):
     def TREECELL(self, sortie):
         '''
         @name TREE@@CELL
-        @param @@treeview@@line[,col]@@data
+        @param @@treeview@@[line[,col]]@@[data]
         @brief Modify a cell or a line
         @info Indicate the --tree/-t option
         @info line: path (1 ou 1:0)
         @info col: colonne (optionnel)
         @info data: text|text|text
+        @info if not `data', the line will be erased
+        @info if not `col', line will be replaced 
+        @info else the cellule will be modified
         '''
         # voir soucis path dans modif_cell_str
-        name, place, value = sortie.split('@@')[2:]
+        name, place, value = sortie.split('@@',4)[2:]
         self.modif_cell_str(name, place, value)
 
     def TREEIMG(self, sortie):
@@ -2417,12 +2543,12 @@ class CmdTREEVIEW(object):
         treeview, modele = self.return_tree_store(name)
         liste_data       = self.gui.modif_type(value, modele)
         filename         = liste_data[int(col)]
-        pixbuf = gtk.gdk.pixbuf_new_from_file_at_size(filename, int(size), int(size) )
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(filename, int(size), int(size) )
         liste_data[int(col)] = pixbuf
         modele.append(None, liste_data)
         num_row = len(list(modele))-1
         if num_row > 0:
-            treeview.scroll_to_cell(num_row)
+            gobject.idle_add(treeview.scroll_to_cell, num_row)
 
     def TREEEND(self, sortie):
         '''
@@ -2432,35 +2558,34 @@ class CmdTREEVIEW(object):
         @info Indicate the --tree/-t option
         @info data: text|text|text
         '''
-        name, value      = sortie.split('@@')[2:]
+        name, value      = sortie.split('@@',3)[2:]
         treeview, modele = self.return_tree_store(name)
         liste            = self.gui.modif_type(value, modele)
         modele.append(None, liste )
         num_row = len(list(modele))-1
         if num_row > 0:
-            treeview.scroll_to_cell(num_row)
+            gobject.idle_add(treeview.scroll_to_cell, num_row)
 
     def TREEUP(self, sortie):
         '''
         @name TREE@@UP
         @param @@treeview[@@line]
-        @brief Push up the selected line or the indicated line
+        @brief Push up the selected line or the indicated line (not working with gtk3)
         @info Indicate the --tree/-t option
         @info line: line number (optional)
         '''
+        name = sortie.split('@@')[2]
         iter, path, model = self.tree_up_down(sortie)
-        l  = list(path)
-        #enleve 1 au dernier num du path
-        n = int(l[-1]) -1
+        str_path = model.get_string_from_iter(iter)
+        n = int(str_path[-1])
+        n-=1
         if n == -1:
-            path = (len(model)-1)
-            new_iter = model.get_iter(path)
-            model.move_after(iter, new_iter)
-        else:
-            l[-1]    = n
-            path     = tuple(l)
-            new_iter = model.get_iter(path)
-            model.move_before(iter, new_iter)
+            next_iter = model.get_iter_from_string(str(len(model)-1))
+            model.move_after(iter, next_iter)
+            return
+        prev_str_path = str_path[:-1]+str(n)
+        prev_iter = model.get_iter_from_string(prev_str_path)
+        model.move_before(iter, prev_iter)
 
     def TREEDOWN(self, sortie):
         '''
@@ -2551,7 +2676,7 @@ class CmdTREEVIEW(object):
         name = sortie.split('@@')[2]
         self.list_hizo   = []
         treeview, modele = self.return_tree_store(name)
-        modele.foreach(self.return_tree)
+        modele.foreach(self.return_tree, None)
         if import_py is not None:
             if not arg:
                 getattr(self.IMPORT, name) (None, self.list_hizo, 'hizo')
@@ -2560,7 +2685,7 @@ class CmdTREEVIEW(object):
                 return (None, self.list_hizo, 'hizo')
         var  = '@@'.join(self.list_hizo)
         tree = """%s hizo@%s""" % (name, var)
-        self.send(tree)
+        self.send(tree.encode('utf8'))
 
     def TREECLEAR(self, sortie):
         '''
@@ -2585,13 +2710,17 @@ class CmdTREEVIEW(object):
         @info col/None: if None, will be the entire line
         @info motif: Regular expression
         '''
-        name, col, item  = sortie.split('@@')[2:]
+        name, col, item  = sortie.split('@@',4)[2:]
         treeview, modele = self.return_tree_store(name)
         liste = []
-        modele.foreach(self.find_tree_item, (col, item, liste) )
         liste_find = [item]
-        for item in liste:
-            liste_find.append( self.tup_path_to_str_path(item) )
+        for line in modele:
+            if col == 'None':
+                text = ''.join(list(line))
+            else:
+                text = list(line)[int(col)]
+            if re.search(item.replace('(','\(').replace(')','\)'), text):
+                liste_find.append( line.path.to_string() )
         if import_py is not None:
             if not arg:
                 getattr(self.IMPORT, name) (None, liste_find, 'find')
@@ -2600,7 +2729,7 @@ class CmdTREEVIEW(object):
                 return (None, liste_find, 'find')
         liste_find = self.list_to_string(liste_find)
         cmd="""%s find@%s""" % (name, liste_find)
-        self.send(cmd)
+        self.send(cmd.encode('utf8'))
 
     def TREEFINDDEL(self, sortie, arg=False):
         '''
@@ -2613,39 +2742,27 @@ class CmdTREEVIEW(object):
         @info col/None: if None, will be the entire line
         @info motif: Regular expression
         '''
-        name, col, item  = sortie.split('@@')[2:]
+        name, col, item  = sortie.split('@@',4)[2:]
         treeview, modele = self.return_tree_store(name)
-        liste = []
-        modele.foreach(self.find_tree_item, (col, item, liste) )
-        if liste:
-            liste_ligne = list( modele[ liste[0] ] )
-            del modele[ liste[0] ]
-            if import_py is not None:
-                if not arg:
-                    getattr(self.IMPORT, name) (liste[0], liste_ligne, 'finddel')
-                    return
-                else:
-                    return (liste[0], liste_ligne, 'finddel')
+        liste_ligne = []
+        str_path = None
+        list_rows = self.find_tree_item(modele, col, item)
+        if list_rows:
+            line = list_rows[0]
+            liste_ligne = list(line)
+            str_path = line.path.to_string()
             liste_find  = self.list_to_string(liste_ligne)
-            str_path    = self.tup_path_to_str_path( liste[0] )
-            cmd = """%s finddel@%s@%s""" % (name, str_path, liste_find)
+            modele.remove(line.iter)
+            text = """%s finddel@%s@%s""" % (name, str_path, liste_find)
         else:
-            if import_py is not None:
-                if not arg:
-                    getattr(self.IMPORT, name) (None, [], 'finddel')
-                    return
-                else:
-                    return False
-            cmd = """%s finddel@NoItemFind""" % name
-        self.send(cmd)
-
-    def tup_path_to_str_path(self, path):
-        try:
-            parent, child = path
-            str_path = '%s:%s' % (parent, child)
-        except:
-            str_path = path[0]
-        return str_path
+            text = """%s finddel@NoItemFound""" % name
+        if import_py is not None:
+            if not arg:
+                getattr(self.IMPORT, name) (str_path, liste_ligne, 'finddel')
+                return
+            else:
+                return (str_path, liste_ligne, 'finddel')
+        self.send(text.encode('utf8'))
 
     def TREEFINDSELECT(self, sortie):
         '''
@@ -2656,22 +2773,40 @@ class CmdTREEVIEW(object):
         @info col/None: if None, will be the entire line
         @info motif: Regular expression
         '''
-        name, col, item  = sortie.split('@@')[2:]
+        name, col, item  = sortie.split('@@',4)[2:]
         treeview, modele = self.return_tree_store(name)
-        liste = []
-        modele.foreach(self.find_tree_item, (col, item, liste) )
-        if liste: treeview.set_cursor( liste[0] )
+        print modele, col, item
+        list_rows = self.find_tree_item(modele, col, item)
+        if list_rows:
+            path = list_rows[0].path
+            treeview.set_cursor(path, None, False)
+        return
 
-    def find_tree_item(self, liststore, path, iter, tup):
-        col, item, liste = tup
-        donnees=list(liststore[iter])
-        try:
-            if re.search(item.replace('(','\(').replace(')','\)'), donnees[int(col)]):
-                liste.append(path)
-        except:
-            item = item.split('|')
-            if item == donnees:
-                liste.append(path)
+    def find_tree_item(self, modele, col, item):
+        liste = []
+        print  modele, str(col), item
+        for line in modele:
+            if eval(str(col)) is None:
+                text = '|'.join(list(line))
+            else:
+                text = list(line)[int(str(col))]
+            if re.search(item.replace('(','\(').replace(')','\)'), text):
+                liste.append(line)
+        return liste
+    
+    def TREESELECT(self, sortie):
+        '''
+        @name TREE@@SELECT
+        @param @@treeview@@row
+        @brief Select row in the treeview
+        @info Indicate the --tree/-t option
+        @info row: integrer
+        '''
+        name, row  = sortie.split('@@',3)[2:]
+        treeview, modele = self.return_tree_store(name)
+        iter = modele.get_iter_from_string(row)
+        path = modele.get_path(iter)
+        GObject.idle_add(treeview.set_cursor, path, None, False)
 
     def return_tree_store(self, name):
         treeview = eval('self.gui.%s' % (name) )
@@ -2697,20 +2832,27 @@ class CmdTREEVIEW(object):
     '''
     def list_to_string(self, donnees):
         l = []
+        li = ''
         for item in donnees:
             try:
                 eval('%s'%item)
-                l.append(str(item))
+                #l.append(str(item))
+                item = '%s' % str(item)
             except:
-                l.append(item)
-        return '|'.join(l)
+                item = '%s' % item.decode('utf8')
+                pass
+                #l.append(item)
+            li += item+'|'
+        return li[:-1]
+        #return '|'.join(l)
+        #return '|'.join( map(str, donnees) )
 
     def sauv_tree(self, liststore, path, iter, fichier):
         donnees = list(liststore[iter])
         ligne   = self.list_to_string(donnees)
         self.fichier_save_tree.write(ligne+'\n')
         
-    def return_tree(self, liststore, path, iter):
+    def return_tree(self, liststore, path, iter, arg=None):
         donnees = list(liststore[iter])
         ligne   = self.list_to_string(donnees)
         path    = liststore.get_string_from_iter(iter)
@@ -2725,12 +2867,8 @@ class CmdTREEVIEW(object):
     def modif_cell_int(self, name, place, value):
         store    = eval('self.gui.store_%s' % (name) )
         row, col = place.replace(' ','').split(',')
-        if ':' in row:
-            row = tuple([eval(i) for i in row.split(':')])
-        else:
-            row = int(row)
         store[row][int(col)] = int(value)
-        
+         
     def modif_cell_str(self, name, place, value):
         if self.iter_select is None: return
         store    = eval('self.gui.store_%s' % (name) )
@@ -2773,11 +2911,15 @@ class CmdTREEVIEW(object):
             #print model.get_string_from_iter(iter)
             liste    = list(model[iter])
             ligne    = str(path[0])
-            list_str = self.list_to_string(liste)
+            #list_str = self.list_to_string(liste)
+            list_str = '|'.join(map(str, liste))
             DEBUG( '>> [[ retourne_selection ]] : %s %s' % (path, list_str ))
             if import_py is not None:
                 return (path, liste)
-            return '%s@%s' % (path, list_str)
+            try:
+                 return u'%s@%s' % (path, list_str)
+            except:
+                return u'%s@%s' % (path, list_str.decode('utf8'))
         else: return None  #['None']
 
 
@@ -2788,7 +2930,7 @@ class CmdTEXTVIEW(object):
     '''                
     def TEXT(self, sortie, arg=False):
         cmd = 'TEXT%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
         
     def TEXTAUTOUR(self, sortie, tag=False):
         '''
@@ -2814,7 +2956,7 @@ class CmdTEXTVIEW(object):
 
     def TEXTCLEAR(self, sortie):
         '''
-        @name TEXT@@CLEAR@@
+        @name TEXT@@CLEAR
         @param @@textview
         @brief Deletes the textview
         '''
@@ -2824,26 +2966,32 @@ class CmdTEXTVIEW(object):
             start, end            = buffertexte.get_bounds()
             buffertexte.delete(start, end)
 
+
+        
     def TEXTCREATETAG(self, sortie):
         '''
         @name TEXT@@CREATETAG
         @param @@textview@@tagname@@args
-        @example echo 'TEXT@@CREATETAG@@textview[,textview,...]@@redItalic@@style=pango.STYLE_ITALIC,foreground=red'
+        @example echo 'TEXT@@CREATETAG@@textview[,textview,...]@@redItalic@@style=Pango.Style.ITALIC,foreground=red'
         @brief Creates a tag that can be used for the textview
         @info tagname: tag name
-        @info args: see pygtk doc, e.g.: style=pango.STYLE_ITALIC
+        @info args: see pygtk doc, e.g.: style=Pango.Style.ITALIC
+        @info gtk2: pango.STYLE_ITALIC
+        @info gtk3: Pango.Style.ITALIC
         '''
         name, tagname, args   = sortie.split('@@')[2:]
         for name in name.replace(' ','').split(','):
             textview, buffertexte = self.retourne_textview_buffer(name)
             tag_table             = buffertexte.get_tag_table()
-            tag                   = gtk.TextTag(tagname)
+            tag                   = Gtk.TextTag(name=tagname)
             for arg in args.replace(' ','').split(','):
                 nom, value = arg.split('=')
                 try:
                     value = eval(value)
                 except: pass
+                print nom, value, type(value)
                 tag.set_property(nom, value)
+            #tag.set_property('name', tagname)
             tag.set_data('balise', tagname)
             tag_table.add(tag)
 
@@ -2909,7 +3057,7 @@ class CmdTEXTVIEW(object):
         text                  = text.replace('\\n', '\n')
         self.insert_text(buffertexte, end, text, tag)
         p_text_mark = buffertexte.create_mark ('p_buffer', end, False)
-        textview.scroll_to_mark(p_text_mark,0.0)
+        textview.scroll_to_mark(p_text_mark,0.0, True, 0.5, 0.0)
 
     def TEXTENDTAG(self, sortie):
         '''
@@ -2940,7 +3088,7 @@ class CmdTEXTVIEW(object):
                 self.insert_text(buffertexte, end, texte)
                 break
             p_text_mark = buffertexte.create_mark ('p_buffer', end, False)
-            textview.scroll_to_mark(p_text_mark,0.0)
+            textview.scroll_to_mark(p_text_mark,0.0, True, 0.5, 0.0)
 
     def TEXTFIND(self, sortie):
         '''
@@ -2964,7 +3112,7 @@ class CmdTEXTVIEW(object):
                 ends_line = True
                 text = text[:-1]
             try:
-                debut, fin = iter.forward_search(text, gtk.TEXT_SEARCH_TEXT_ONLY)
+                debut, fin = iter.forward_search(text, Gtk.TextSearchFlags.TEXT_ONLY)
             except:
                 return (start, end, flag)
             if starts_line:
@@ -2987,12 +3135,12 @@ class CmdTEXTVIEW(object):
             debut, fin, flag = get(fin, text)
         '''
         debut, fin            = start.forward_search(text,
-                                                     gtk.TEXT_SEARCH_TEXT_ONLY,
+                                                     Gtk.TextSearchFlags.TEXT_ONLY,
                                                      limit=None)
         start_line = debut.starts_line()
         while not start_line:
             debut, fin = fin.forward_search(text,
-                                            gtk.TEXT_SEARCH_TEXT_ONLY,
+                                            Gtk.TextSearchFlags.TEXT_ONLY,
                                             limit=None)
             start_line = debut.starts_line()
         p_text_mark = buffertexte.create_mark ('p_buffer', fin, False)
@@ -3011,7 +3159,7 @@ class CmdTEXTVIEW(object):
         name                  = sortie.split('@@')[2]
         textview, buffertexte = self.retourne_textview_buffer(name)
         start, end            = buffertexte.get_bounds()
-        texte = buffertexte.get_text(start,end)
+        texte = buffertexte.get_text(start,end,False)
         if import_py is not None:
             if not arg:
                 getattr(self.IMPORT, name)('hizo', texte)
@@ -3035,7 +3183,9 @@ class CmdTEXTVIEW(object):
             chaine                = fichier.read()
             fichier.close()
             buffertexte.set_text(chaine)
-        except: pass
+        except:
+            raise
+            pass
 
     def TEXTRSELECT(self, sortie, tag=False):
         '''
@@ -3069,11 +3219,13 @@ class CmdTEXTVIEW(object):
         try:
             textview, buffertexte = self.retourne_textview_buffer(name)
             start, end            = buffertexte.get_bounds()
-            texte                 = buffertexte.get_text(start,end)
+            texte                 = buffertexte.get_text(start,end,False)
             fichier = open(path, "w")
             fichier.writelines(texte)
             fichier.close()
-        except: pass
+        except:
+            #raise
+            pass
         
     def TEXTSELECTTAG(self, sortie):
         '''
@@ -3132,16 +3284,21 @@ class CmdTEXTVIEW(object):
             l_tags.append(textag)
         textview, buffertexte = self.retourne_textview_buffer(sortie.split('@@')[2])
         tag_table       = buffertexte.get_tag_table()
-        tmpBuffer       = gtk.TextBuffer(tag_table)
-        deserialization = tmpBuffer.register_deserialize_tagset()
-        tag_table.foreach(get_tags)
+        tmpBuffer       = Gtk.TextBuffer.new(tag_table)
+        deserialization = tmpBuffer.register_deserialize_tagset(None)
+        tag_table.foreach(get_tags,None)
+        start, end = buffertexte.get_bounds()
+
         tmpBuffer.deserialize(
                     tmpBuffer, deserialization, tmpBuffer.get_start_iter(),
                     buffertexte.serialize(
                                   buffertexte,
-                                  "application/x-gtk-text-buffer-rich-text",
-                                  buffertexte.get_start_iter(), 
-                                  buffertexte.get_end_iter(),
+                                  Gdk.Atom.intern_static_string("application/x-gtk-text-buffer-rich-text"),
+                                  start,
+                                  end,
+                                  #buffertexte.get_start_iter(), 
+                                  #buffertexte.get_end_iter(),
+                                  #Gtk.TextBuffer.get_end_iter(buffertexte),
                                          ),
                               )
         l_flags = []
@@ -3164,7 +3321,7 @@ class CmdTEXTVIEW(object):
                     l_flags.remove(bo)
             pos=pos+1
         texte = tmpBuffer.get_text(tmpBuffer.get_start_iter(),
-                                   tmpBuffer.get_end_iter())
+                                   tmpBuffer.get_end_iter(), False)
         #print texte
         #return
         if import_py is not None:
@@ -3207,11 +3364,10 @@ class CmdTEXTVIEW(object):
         style = ssm.get_scheme(stylename)
         buffertexte.set_style_scheme(style)
 
-
 class CmdWEBKIT(object):
     def WEBKIT(self, sortie, arg=False):
         cmd = 'WEBKIT%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd),sortie)
+        GObject.idle_add(getattr(self, cmd),sortie)
 
     def WEBKITSAVE(self, sortie, arg=False):
         '''
@@ -3269,7 +3425,7 @@ class CmdWEBKIT(object):
         @name WEBKIT@@REQUEST
         @param @@webview@@pattern
         @brief Filters the http requests
-        @info pattern: All / item
+        @info pattern: `ALL' / item
         @info All: calls the function with all the requests as argument
         @info item: filters via the regular expression (does not display the filtered requests in the webview)
         @return sh: request@http://...
@@ -3347,8 +3503,7 @@ class CmdWEBKIT(object):
         for name in sortie.split('@@')[2].replace(' ','').split(','):
             webview = eval('self.gui.%s' % name)
             l_weboverlink.append(name)
-            idc = webview.connect_after("hovering-over-link",
-                                        self.gui.hovering_over_link_cb)
+            idc = webview.connect_after("hovering-over-link", self.gui.hovering_over_link_cb)
             self.gui.add_signal_to_dic(name, "weboverlink", idc)
 
     def WEBKITMENU(self, sortie):
@@ -3445,47 +3600,53 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
     '''
     @page commandes Glade2script commands
     '''
+    
     '''
     *** APP INDICATOR
-    '''
+    
     def APPINDICATOR(self, sortie, arg=False):
-        '''
+        
         @name APPINDICATOR@@
         @param name@@icon@@menu@@icon-path
-        @brief Init new app indicator
+        @brief Init new app indicator (partial work with GTK3)
         @info name: acces name
         @info icon: the icon name
         @info menu: the context menu
-        @info path: additional icon theme path or None
+        @info path: A custom path for finding icons additional or None
         @info see exemple for usage
-        '''
+        
         name, icon, menu, path = sortie.split('@@')[1:]
         menu = getattr(self.gui, menu)
         args = ["example-simple-client","indicator-messages",
-                appindicator.CATEGORY_APPLICATION_STATUS]
+                appindicator.IndicatorCategory.APPLICATION_STATUS]
+        ind = appindicator.Indicator.new (*args)
         if path != 'None':
-            args.append(path)
-        ind = appindicator.Indicator (*args)
+            ind.set_icon_theme_path (path)
         ind.set_icon(icon)
         ind.set_menu(menu)
+        #~FIXME do not work
+        #ind.set_attention_icon_full('gtk-yes','att_icon')
         setattr(self.gui, name, ind)
-        
+    '''
+    
     '''
     *** CLIPBOARD
     '''    
     def CLIP(self, sortie, arg=False):
         self.current_clipboard_text = None
         cmd = 'CLIP%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd),sortie, arg)
+        GObject.idle_add(getattr(self, cmd),sortie, arg)
         if import_py is not None:
             if arg:
                 self.IMPORT.clipboard(self.current_clipboard_text)
                 return
             else:
                 return self.current_clipboard_text
-        self.send( 'clipboard %s' % texte)
-    
-    def CLIPGET(self, data=None, arg=False):
+        self.send( 'clipboard %s' % self.current_clipboard_text)
+        #return self.current_clipboard_text
+        
+
+    def CLIPGET(self, data=None, arg=None):
         '''
         @name CLIP@@GET
         @return sh: 'clipboard' function will be called with the clipboard content as argument.
@@ -3503,13 +3664,14 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
             return
         self.send( 'clipboard %s' % texte)
 
-    def CLIPSET(self, data=None, arg=False):
+    def CLIPSET(self, data=None, arg=None):
         '''
         @name CLIP@@SET
         @param @@My text
         @brief Loads 'My text' in the clipboard. Indicate the --clipboard option
         '''
-        self.gui.clipboard.set_text( data.replace('CLIP@@SET@@','') )
+        texte = data.replace('CLIP@@SET@@','')
+        self.gui.clipboard.set_text( texte, len(texte) )
 
     '''
     *** COLOR
@@ -3518,23 +3680,25 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name COLOR@@
         @param widget,widget@@modify@@gtk_state@@color
-        @example echo 'COLOR@@_textview1.modify_base@@NORMAL@@black'
-        @brief Changes the color of a widget, #FFFFFF or name color
-        @info modify_base, modify_text, modify_bg, modify_fg
-        @info NORMAL, SELECTED, ACTIVE, PRELIGHT
+        @example echo 'COLOR@@_textview1@@color@@NORMAL@@black'
+        @brief Changes the color of a widget
+        @info #FFFFFF or name color
+        @info modify gtk2: modify_fg, modify_text, modify_bg, modify_base
+        @info modify gtk3: background_color, color
+        @info gtk_state: NORMAL, SELECTED, ACTIVE, PRELIGHT
         '''
         widget, action, etat, color = sortie.split('@@')[1:]
         for wid in widget.replace(' ','').split(','):
-            widget_action = '%s.%s' % (wid, action)
-            etat = 'gtk.STATE_%s' % etat
-            gobject.idle_add(self.gui.set_color, widget_action, etat, color)
+            widget_action = '%s.override_%s' % (wid, action)
+            GObject.idle_add(self.gui.set_color, widget_action,
+                             'Gtk.StateFlags.%s'%etat, color)
 
     '''
     *** CONFIG
     '''
     def CONFIG(self, sortie, arg=False):
         cmd = 'CONFIG%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
     
     def CONFIGSAVE(self, sortie):
         '''
@@ -3593,7 +3757,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
 
     def FILE(self, sortie, arg=False):
         cmd = 'FILE%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def FILESETFILTER(self, sortie, arg=False):
         '''
@@ -3605,7 +3769,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         nom, genre, filtre = sortie.split('@@')[2:]
         widget     = eval('self.gui.%s' % (nom) )
-        filefilter = gtk.FileFilter()
+        filefilter = Gtk.FileFilter()
         filtres    = filtre.replace(' ','').split(',')
         for filtre in filtres:
             getattr(filefilter, genre)(filtre)
@@ -3616,7 +3780,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
     '''
     def GEO(self, sortie, arg=False):
         cmd='GEO%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def GEOGET(self, sortie, arg=False):
         '''
@@ -3684,10 +3848,21 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
     def GTKRC(self, sortie, arg=False):
         '''
         @name GTKRC@@
-        @param window@@rcfile
-        @brief Loads a gtkrc-style file
-        @info rcfile: relative or absolute path of the gtk-style file
+        @param stylefile
+        @brief Loads a rc-style file (or css file in gtk3)
+        @info stylefile: relative or absolute path of the gtk-style file
         '''
+        gtkrc = sortie.split('@@')[1]
+        screen = Gdk.Screen.get_default()
+        provider = Gtk.CssProvider()
+        if os.path.isfile(gtkrc):
+            provider.load_from_path(gtkrc)
+        else:
+            provider.load_from_data(gtkrc)
+        context = Gtk.StyleContext()
+        GObject.idle_add(context.add_provider_for_screen, screen, provider,
+                                        Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        return
         widget, rcfile = sortie.split('@@')[1:]
         widget = eval('self.gui.%s' % (widget) )
         self.gui.apply_gtkrc(widget, rcfile)
@@ -3706,10 +3881,10 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         widget, path, x, y = sortie.split('@@')[1:]
         if path:
-            pixbuf = gtk.gdk.pixbuf_new_from_file_at_size( path, int(x), int(y) )
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size( path, int(x), int(y) )
             self.gui.dic_img[widget] = path
             img = eval('self.gui.%s' % (widget) )
-            gobject.idle_add(img.set_from_pixbuf, pixbuf)
+            GObject.idle_add(img.set_from_pixbuf, pixbuf)
 
     '''
     *** GET THE STATUS OF CHILD TOOGLE WIDGET
@@ -3774,26 +3949,28 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name MAKEMENU@@
         @param widget@@menu_name@@item::fonction::arg@@...
-        @brief Creates a context menu
+        @brief Creates a context menu (is easier to use glade to create it ...)
         @info widget: the widget which will receive the menu
         @info menu_name: menu name
-        @info item: menu label, function: function to be called, arg: function argument
-        @info separator:None:None
+        @info item: menu label
+        @info function: function to be called
+        @info arg: function argument
+        @info use `separator::None::None' to add separator
         '''
         widget = eval( 'self.gui.%s' % sortie.split('@@')[1])
         menu_name = sortie.split('@@')[2]
-        menu = gtk.Menu()
+        menu = Gtk.Menu()
         idc  = widget.connect('button-press-event', self.dyn_menu_cb, menu)
         #widget.set_title('ouehhh')
         setattr(self.gui, menu_name, menu)
         for elem in sortie.split('@@')[3:]:
             item, function, arg = elem.split('::')
             if item == 'separator':
-                separator = gtk.SeparatorMenuItem()
+                separator = Gtk.SeparatorMenuItem()
                 menu.append( separator )
                 separator.show()
             else:
-                menuitem = gtk.MenuItem(label=item)
+                menuitem = Gtk.MenuItem(label=item)
                 menuitem.connect('activate', self.call_function_from_menu,
                                     item, function, arg)
                 menuitem.props.name = item
@@ -3808,7 +3985,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
 
     def dyn_menu_cb(self, widget, event=None, menu=None, arg=None):
         if event.button == 3:
-                menu.popup(None,None,None,event.button,event.time)
+                menu.popup(None,None,None,None,event.button,event.time)
 
     def SUBMENU(self, sortie, arg=False):
         '''
@@ -3823,19 +4000,19 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         label_menuitem = sortie.split('@@')[2]
         for menuitem in top_menu.get_children():
             #print menuitem.props.label, label_menuitem
-            if type(menuitem) == gtk.SeparatorMenuItem: 
+            if type(menuitem) == Gtk.SeparatorMenuItem: 
                 #if no control, menu separator remplaced by space !!!!????
                 continue
             #print str(menuitem.get_label()).replace('_',''), menuitem.props.label
             if menuitem.props.label == label_menuitem:
-                menu = gtk.Menu()
+                menu = Gtk.Menu()
                 for elem in sortie.split('@@')[3:]:
                     item, function, arg = elem.split('::')
                     if item == 'separator':
-                        separator = gtk.SeparatorMenuItem()
-                        menuitem.append( separator )
+                        separator = Gtk.SeparatorMenuItem()
+                        menu.append( separator )
                     else:
-                        menuit = gtk.MenuItem(label=item, use_underline=False)
+                        menuit = Gtk.MenuItem(label=item, use_underline=False)
                         menuit.connect('activate', self.call_function_from_menu,
                                     item, function, arg)
                         menuit.props.name = item
@@ -3890,7 +4067,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name NOTIFY@@
         @param timer@@titre@@texte@@icon
-        @example echo 'NOTIFY@@2@@Titre@@Ligne1\\n<b>Ligne2</b>\\n<i>Ligne3</i>@@dialog-yes'
+        @example echo 'NOTIFY@@2@@Titre@@Ligne1\\nLigne2\\n<i>Ligne3</i>@@dialog-yes'
         @brief Displays a notify message
         @info timer: display delay in millisecondes
         @info titre: message title
@@ -3900,18 +4077,18 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         delay, titre, message, icon = sortie.split('@@')[1:]
         message = message.replace('\\n','\n')
-        if not pynotify.init("Multi Action Test"):
+        if not Notify.init("Multi Action Test"):
             return
         if icon:
             if '/' in icon:
                 uri = "file://%s" % icon
             else:
                 uri=icon
-            n = pynotify.Notification(titre, message, uri)
+            n = Notify.Notification.new(titre, message, uri)
         else:
-            n = pynotify.Notification(titre, message)
-        if systray_icon is not None:
-            n.attach_to_status_icon(self.gui.systray)
+            n = Notify.Notification.new(titre, message)
+        #if systray_icon is not None:
+        #    n.attach_to_status_icon(self.gui.systray)
         if delay: t = int(delay)*1000
         else: t = 3000
         n.set_timeout(t)
@@ -3921,7 +4098,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
 
     def PLUGIN(self, sortie, arg=False):
         cmd = 'PLUGIN%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
     
     def PLUGININIT(self, sortie):
         '''
@@ -3934,16 +4111,10 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         l = sortie.split('@@')[2:]
         plugin = l.pop(0)
         name = l[0]
-        exec('import %s.plugin as plug' % plugin)
-        setattr(self, name, plug.Plugin(self, '@@'.join(l)) )
-        return
         #print plugin
         #plug = __import__(plugin)
-        for name in names:
-            exec('import %s.plugin as plug' % plugin)
-            arg = name+'@@'+'@@'.join(l)
-            ll = [name]+l
-            setattr(self, name, plug.Plugin(self, '@@'.join(ll)) )
+        exec('import %s.plugin as plug' % plugin)
+        setattr(self, name, plug.Plugin(self,'@@'.join(l)) )
         
     def PLUGINCMD(self, sortie):
         '''
@@ -3955,10 +4126,9 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         #exec('self.%(name)s.CMD(%(cmd)s)')
         getattr(self, name).CMD(cmd)
         
-    
     def POINTER(self, sortie, arg=False):
         cmd = 'POINTER%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def POINTERSTART(self, sortie):
         '''
@@ -3970,14 +4140,14 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         @return py-cb: ('move', x, y)
         '''
         delay, name = sortie.split('@@')[2:]
-        widget          = eval( 'self.gui.%s' % name )
-        rootwin         = widget.get_screen().get_root_window()
-        x, y, mods      = rootwin.get_pointer()
+        widget      = eval( 'self.gui.%s' % name )
+        rootwin     = widget.get_screen().get_root_window()
+        win, x, y, mask = rootwin.get_pointer()
         #self.flag_move  = True
         self.old_x_move = x
         self.old_y_move = y
         setattr(self, 'flag_move_%s' % name, True)
-        gobject.timeout_add(int(delay), self.check_pointer, widget, name)
+        GObject.timeout_add(int(delay), self.check_pointer, widget, name)
 
     def POINTERSTOP    (self, sortie):
         '''
@@ -3990,8 +4160,8 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         self.flag_move = False
 
     def check_pointer(self, widget, name):
-        rootwin    = widget.get_screen().get_root_window()
-        x, y, mods = rootwin.get_pointer()
+        rootwin = widget.get_screen().get_root_window()
+        win, x, y, mods = rootwin.get_pointer()
         if x != self.old_x_move or y != self.old_y_move:
             self.old_x_move = x
             self.old_y_move = y
@@ -4008,7 +4178,8 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name SCREEN@@
         @brief Loads the screen dimensions in the environment
-        @info keep for retro-compatibility since 2.3.0
+        @info keep for retro-compatibility since < 2.3.0
+        @info otherwise G2S_SCREEN_HEIGHT, G2S_SCREEN_WIDTH variables was loaded
         @return screen_height="1200" screen_width="1800"
         @return py: (width, height)
         '''
@@ -4029,7 +4200,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         @brief runs a pygtk command (show(), hide(), ...)
         '''
         sortie = sortie.replace('SET@','')
-        gobject.idle_add(self.gui.set_widget, sortie )
+        GObject.idle_add(self.gui.set_widget, sortie )
 
     '''
     *** STATUSBAR
@@ -4042,8 +4213,8 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         widget, text = sortie.split('@@')[1:]
         statusbar = getattr(self.gui, widget)
-        context = getattr(self.gui, 'context_%s'%widget)
-        gobject.idle_add(statusbar.push, context, text)
+        context   = getattr(self.gui, 'context_%s'%widget)
+        GObject.idle_add(statusbar.push, context, text)
 
     '''
     *** SYSTRAY
@@ -4060,14 +4231,14 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         @info Default hide, use pygtk command to show it and more (see exemple)
         '''
         l = sortie.split('@@')[1:]
-        gobject.idle_add(self.gui.new_systray_icon, *l)
+        GObject.idle_add(self.gui.new_systray_icon, *l)
 
     '''
     *** TOGGLE
     '''
     def TOGGLE(self, sortie, arg=False):
         cmd = 'TOGGLE%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def TOGGLESENSITIVE(self, sortie):
         '''
@@ -4121,7 +4292,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
     '''
     def TERM(self, sortie, arg=False):
         cmd='TERM%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd),sortie)
+        GObject.idle_add(getattr(self, cmd),sortie)
 
     def TERMFONT(self, sortie):
         '''
@@ -4138,7 +4309,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name TERM@@KILL
         @param [@@sig]
-        @brief Kills the process launched in the terminal
+        @brief Kills the process launched in the terminal (not avalaible with GTK3)
         @info sig: numerical kill signal
         @info Indicate the --terminal option
         '''
@@ -4155,7 +4326,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         @brief Writes in the terminal
         '''
         cmd = data.replace('TERM@@WRITE@@','').replace('\\n','\n').replace('\\r','\r')
-        self.gui.terminal.feed(cmd)
+        self.gui.terminal.feed(cmd, len(cmd))
 
     def TERMSEND(self, data=None):
         '''
@@ -4164,12 +4335,12 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         @brief Runs a command in the terminal
         '''
         cmd = data.replace('TERM@@SEND@@','').replace('\\n','\n').replace('\\r','\r')
-        self.gui.terminal.feed_child(cmd)
-
+        self.gui.terminal.feed_child(cmd, len(cmd))
+        self.gui.terminal.feed_child('', -1)
 
     def TIMER(self, sortie, arg=False):
         cmd='TIMER%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd), sortie)
+        GObject.idle_add(getattr(self, cmd), sortie)
 
     def TIMERSTART(self, sortie):
         '''
@@ -4180,7 +4351,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         delay, function = sortie.split('@@')[2:]
         setattr(self, 'flag_timer_%s' % function, True)
-        gobject.timeout_add(int(delay), self.check_timer, function)
+        GObject.timeout_add(int(delay), self.check_timer, function)
 
     def TIMERSTOP(self, sortie):
         '''
@@ -4200,13 +4371,13 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
 
     def WINDOW(self, sortie, arg=False):
         cmd = 'WINDOW%s' % sortie.split('@@')[1]
-        gobject.idle_add(getattr(self, cmd),sortie)
+        GObject.idle_add(getattr(self, cmd),sortie)
 
     def WINDOWBACKGROUND(self, sortie):
         '''
         @name WINDOW@@BACKGROUND
         @param @@name@@image
-        @brief Uses an image as window background
+        @brief Uses an image as window background (not available GTK3)
         @info this command must be run before the window display,
         @info set the window on invisible then run a show().
         @info name: window name
@@ -4214,7 +4385,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         name, img    = sortie.split('@@')[2:]
         widget       = eval('self.gui.%s' % name)
-        pixbuf       = gtk.gdk.pixbuf_new_from_file(img)
+        pixbuf       = GdkPixbuf.Pixbuf.new_from_file(img)
         pixmap, mask = pixbuf.render_pixmap_and_mask()
         del pixbuf
         widget.set_app_paintable(True)
@@ -4226,7 +4397,7 @@ class Commandes(CmdCOMBO, CmdTREEVIEW, CmdTEXTVIEW, CmdWEBKIT):
         '''
         @name WINDOW@@TRANS
         @param @@name@@trans@@color
-        @brief Ajusts the transparency and color of the window background
+        @brief Ajusts the transparency and color of the window background (not available GTK3)
         @info add the --transparent option
         @info name: window name
         @info trans: transparency (0 to 1)
@@ -4257,7 +4428,8 @@ class MyThread(threading.Thread, Commandes):
         fichier_t = l_file_splitted.pop(0)
         while True:
             if os.path.exists( fichier_t ):
-                arg = '''%s %s''' % ( fichier_t.replace(' ','\ '), ' '.join(l_file_splitted) )
+                arg = '''%s %s''' % ( fichier_t.replace(' ','\ '),
+                                      ' '.join(l_file_splitted) )
                 break
             fichier_t = '''%s %s''' % ( fichier_t, l_file_splitted.pop(0) )
         return shlex.split(arg)
@@ -4280,9 +4452,9 @@ class MyThread(threading.Thread, Commandes):
                                     )
             PID  = sb.pid
             self.path_FIFO = '/tmp/FIFO%s' % (PID)
+
             while not self.Terminated:
                 sortie = sb.stdout.readline().rstrip()
-                DEBUG('=> [[ PY ]] => %s' % sortie)
                 if sortie == '':
                     self.n_break += 1
                     if self.n_break == 10:
@@ -4290,10 +4462,27 @@ class MyThread(threading.Thread, Commandes):
                         break
                     continue
                 self.n_break = 0
-                try:
-                    cmd = sortie.split('@')[0]
-                    getattr(self, cmd)(sortie)
-                except: pass
+                if "@" in sortie:
+                    if "GET@" in sortie or "SET@" in sortie or "COMBO@" in sortie or "EXIT@" in sortie:
+                        try:
+                            cmd = sortie.split('@')[0]
+                            if cmd in ["GET", "SET", "COMBO", "EXIT"]:
+                                #if sortie != "SET@_progressbar1.pulse()":
+                                #    DEBUG('=> [[ PY ]] => %s' % sortie)
+                                getattr(self, cmd)(sortie)
+                            elif "progressbar1.pulse" not in sortie:
+                                print("[[WARNING]] Please report this to yannubuntu@protonmail.com => %s" % sortie)
+                        except:
+                            print("cmd in error: ", cmd)
+                            raise
+                            pass
+                    else:
+                        DEBUG('=> [[ PY ]] => %s' % sortie)
+                else:
+                    if ( "[debug" not in sortie ):
+                        DEBUG('=> [[ PY ]] => %s' % sortie)
+                    elif debug :
+                        print(sortie)
 
     def from_import(self, sortie, arg=False):
         try:
@@ -4332,12 +4521,12 @@ class MyThread(threading.Thread, Commandes):
                 EXIT = 'no'
             else:
                 self.stop_save()
-                print 'VERSION="glade2script 2.4.0, Copyright (C) 2010-2012, janvier 2012"'
+                print 'VERSION="glade2script 3.2.0, Copyright (C) 2010-2011, November 2011"'
                 print 'EXIT="yes"'
                 EXIT='yes'
         if term_box:
             self.gui.kill_term_child(9)
-        gtk.main_quit()
+        Gtk.main_quit()
         try:
          os.remove(self.path_FIFO)
         except: pass
@@ -4365,8 +4554,11 @@ OPTIONS:
  --combobox=  @@combobox1@@col|IMG
 \t Lists the combobox elements (one per line or per option)
 
+ --css= cssfile
+\t css style file
+
  -d 
-\t Debug
+\t debug
 
  --embed= _drawingarea1@@app
 \t Embeds an application that supports it natively
@@ -4401,6 +4593,9 @@ OPTIONS:
  -s/--sh= file
 \t sh file
 
+ --sourceview= name,box
+\t Add GtkSourceView for textview
+
  --systray= menu@img@infobulle
 \t Notify zone icon
 
@@ -4418,6 +4613,9 @@ OPTIONS:
 
  -t/--tree= @@treeview@@option@@option@@option
 \t Treeview elements list (one per line or per option)
+
+ -v 
+\t verbose
 
  --webcache= webview:folder:pattern:dialog
 \t Puts in cache filtered via the pattern
@@ -4450,7 +4648,7 @@ OPTIONS:
 
 if __name__ == '__main__':
     def DEBUG(arg):
-        if debug: print arg
+        if verbose : print arg
 
     l_sortie      = []
     l_webkit      = []
@@ -4458,9 +4656,9 @@ if __name__ == '__main__':
     l_weboverlink = []
     systray_icon  = []
     DIC_ENV  = {
-                'G2S_SCREEN_WIDTH'  : '0',
-                'G2S_SCREEN_HEIGHT' : '0',
-                'G2S_TERMINAL_PID'  : '0',
+                'G2S_SCREEN_WIDTH'     : '0',
+                'G2S_SCREEN_HEIGHT'    : '0',
+                'G2S_TERMINAL_PID'     : '0',
                 'G2S_SOURCEVIEW_LANG'  : 'None',
                 'G2S_SOURCEVIEW_STYLE' : 'None',
                 }
@@ -4471,7 +4669,7 @@ if __name__ == '__main__':
                  'dic_websubmenu', 'dic_sourceview',
                  ]
     init_none = [
-                 's_bash', 'gtkrc', 'clip', 'term_box',
+                 's_bash', 'gtkrc', 'clip', 'term_box', 'lock_cb',
                  'flag_term', 'embed', 'term_font', 'term_redim',
                  'import_py', 'local_path', 'auto_config', 'load_config',
                  ]
@@ -4480,15 +4678,16 @@ if __name__ == '__main__':
     for i in init_none: exec('%s=None' % i)
 
     debug=False
+    verbose=False
 
     USERLIB = 'object'
 
     try:                                
-        opts, args = getopt.getopt(sys.argv[1:], "hs:g:r:t:d",
+        opts, args = getopt.getopt(sys.argv[1:], "hs:g:r:t:dv",
             ["sh=", "glade=", "retour=","locale=","websubmenu=","libglade",
             "gtkrc=", "tree=","systray=","webcache=","webmenu=","auto-config=",
             "terminal=", "embed=", "import=","webrequest=","weboverlink=",
-            "infobulle=","clipboard=", "webkit=","weblinkfilter=",
+            "infobulle=","clipboard=", "webkit=","weblinkfilter=","lock-cb",
             "terminal-font=","terminal-redim","webdownload=","sourceview=",
             "gtkbuilder","combobox=","transparent=","webloaded=","load-config="]
                     )
@@ -4501,8 +4700,10 @@ if __name__ == '__main__':
             sys.exit()
         elif opt in ("-s", "--sh"): 
             s_bash = arg
-        elif opt == '-d':
+        elif opt == "-d":
             debug = True
+        elif opt == "-v":
+            verbose = True
         elif opt in ("-g", "--glade"): 
             f_glade = arg 
         elif opt in ("-r","--retour"):
@@ -4541,7 +4742,7 @@ if __name__ == '__main__':
         elif opt == "--clipboard":
             clip = arg
         elif opt == "--terminal":
-            import vte
+            from gi.repository import Vte
             term_box = arg
         elif opt == "--terminal-font":
             term_font = arg
@@ -4555,12 +4756,13 @@ if __name__ == '__main__':
             USERLIB = 'object'
         elif opt == '--libglade':
             USERLIB = 'widget'
-            import gtk.glade
+            import Gtk.glade
         elif opt == "--webkit":
-            l_webkit.append( arg.split(',') )
-            import webkit, urllib
+            l_webkit.append( arg.replace(' ','').split(',') )
+            from gi.repository import WebKit as webkit
+            import urllib
         elif opt == "--sourceview":
-            import gtksourceview2
+            from gi.repository import GtkSource
             name, box = arg.replace(' ','').split(',')
             dic_sourceview[name] = box
         elif opt == '--transparent':
@@ -4577,13 +4779,13 @@ if __name__ == '__main__':
                 except: pass
             dic_webcache[name] = [dossier, ext, dialog]
         elif opt == '--webrequest':
-            name, ext = arg.split(':')
+            name, ext = arg.split(':').strip()
             dic_webrequest[name] = ext
         elif opt == '--webdownload':
-            name, value = arg.split(':')
+            name, value = arg.split(':').strip()
             dic_webdownload[name] = value
         elif opt == '--weblinkfilter':
-            l = arg.split(':')
+            l = arg.split(':').strip()
             name = l.pop(0)
             filtre = ':'.join(l)
             dic_weblinkfilter[name] = filtre
@@ -4607,25 +4809,30 @@ if __name__ == '__main__':
             load_config = arg
         elif opt == '--auto-config':
             auto_config = arg
-    
+        elif opt == '--lock-cb':
+            lock_cb = True
+
     try:
-        import pynotify
+        from gi.repository import Notify
     except:
         DEBUG("You need to install pynotify to use notification")
+
+    '''
     try:
-        import appindicator
+        from gi.repository import AppIndicator3 as appindicator
     except:
         DEBUG("You need to install appinicator to use app indicator")
-    
+    '''
+
     path_appli, appli_name = os.path.split( f_glade )
     nom_appli= os.path.splitext(appli_name)[0]
     os.chdir(path_appli)
-    
+
     if dic_trans: import cairo
-    
+
     if s_bash is None:
         s_bash = '%s.sh' % os.path.join(os.path.realpath(os.getcwd()), nom_appli)
-    
+
     if local_path is None:
         local_path = os.path.join(os.path.realpath(os.getcwd()), 'locale')
     
@@ -4633,8 +4840,8 @@ if __name__ == '__main__':
         if auto_config is None: path = load_config
         else: path = auto_config
         CONFIG_PARSER = ParseConfig(path)
-    
-    DEBUG("glade2script 2.4.0, Copyright (C) 2010-2012, Janvier 2012")
+
+    DEBUG("glade2script 3.2.4, Copyright (C) 2010-2020, Python %s" % (sys.version,))
     m = Gui()
     m.go_thread()
     m.main()

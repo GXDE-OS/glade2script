@@ -1,5 +1,11 @@
-glade2script (3.0.5-1) unstable; urgency=low
+glade2script (3.2.4~ppa27) oracular; urgency=low
 
-  * Initial release (Closes: #658283)
+  * \\ instead of \ in lines 2711 2782 4424, to avoid Python3 warnings (solves bug 2064106)
 
- -- Yann MRN <yannubuntu@gmail.com>  Thu, 27 Sep 2012 15:14:14 +0200
+ -- Yann MRN <yannubuntu@protonmail.com>  Sun, 21 Jul 2024 23:14:14 +0200
+
+glade2script (3.2.4~ppa23) bionic; urgency=low
+
+  * Sources creation
+
+ -- Yann MRN <yannubuntu@protonmail.com>  Sun, 15 Mar 2020 15:14:14 +0200

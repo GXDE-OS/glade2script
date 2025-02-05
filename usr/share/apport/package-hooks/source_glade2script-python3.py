@@ -1,7 +1,7 @@
-# Apport integration for Glade2script-Gtk2
+# Apport integration for Glade2script-python3
 # (followed https://wiki.ubuntu.com/Apport/DeveloperHowTo )
 #
-# Copyright 2012 Yann MRN
+# Copyright 2020 Yann MRN
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 3, as published
@@ -40,9 +40,9 @@ def add_info(report):
 
     if not apport.packaging.is_distro_package(report['Package'].split()[0]):
         report['ThirdParty'] = 'True'
-        report['CrashDB'] = 'glade2script_gtk2'
+        report['CrashDB'] = 'glade2script_python3'
 
-    packages = ['boot-sav', 'boot-repair', 'os-uninstaller', 'glade2script', 'lvm2', 'dmraid', 'mdadm']
+    packages = ['boot-sav', 'boot-repair', 'os-uninstaller', 'glade2script-python3', 'lvm2', 'dmraid', 'mdadm']
     versions = ''
     for package in packages:
         try:
